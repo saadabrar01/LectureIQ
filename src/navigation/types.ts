@@ -13,8 +13,10 @@ export type RootStackParamList = {
   Voice: { lectureId?: string };
   AddNote: { noteId?: string };
   Summary: { lectureId: string };
-  Quiz: { lectureId: string };
+  Quiz: { lectureId: string; count?: number };
+  QuizConfig: { lectureId: string };
   Settings: undefined;
+  Documents: undefined;
 };
 
 export type MainTabParamList = {

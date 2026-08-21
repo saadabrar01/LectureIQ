@@ -14,13 +14,16 @@ interface HeaderProps {
   subtitle?: string;
   right?: ReactNode;
   back?: boolean;
+  onBack?: () => void;
   transparent?: boolean;
 }
 
-export function Header({ title, subtitle, right, back = false }: HeaderProps) {
+export function Header({ title, subtitle, right, back = false, onBack }: HeaderProps) {
   const insets = useSafeAreaInsets();
   const { theme } = useAppTheme();
   const navigation = useNavigation();
+
+  const handleBack = onBack ?? (() => navigation.goBack());
 
   return (
     <View
@@ -34,7 +37,7 @@ export function Header({ title, subtitle, right, back = false }: HeaderProps) {
       <View style={styles.row}>
         {back ? (
           <Pressable
-            onPress={() => navigation.goBack()}
+            onPress={handleBack}
             hitSlop={10}
             style={({ pressed }) => [
               styles.backBtn,

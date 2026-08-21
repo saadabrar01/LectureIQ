@@ -2,20 +2,22 @@ import React from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../context/ThemeContext';
 import { typography } from '../theme/typography';
 import { GlassCard } from '../components/GlassCard';
 import { FadeUp } from '../components/FadeUp';
+import { Header } from '../components/Header';
 import { userProfile } from '../data/mock';
 import { haptics } from '../utils/helpers';
 
 const STAT_META = [
-  { label: 'Videos', value: 'videos', icon: 'library-books' as const, color: '#8EF0A3' },
-  { label: 'Questions', value: 'questions', icon: 'question-answer' as const, color: '#22C55E' },
-  { label: 'Streak', value: 'streak', icon: 'local-fire-department' as const, color: '#3FC9A7' },
-  { label: 'Minutes', value: 'minutes', icon: 'timer' as const, color: '#6EE7B7' },
+  { label: 'Videos', value: 'videos', icon: 'video-library' as const, color: '#35D47A' },
+  { label: 'Questions', value: 'questions', icon: 'question-answer' as const, color: '#38CFA8' },
+  { label: 'Streak', value: 'streak', icon: 'local-fire-department' as const, color: '#8EA6E8' },
+  { label: 'Minutes', value: 'minutes', icon: 'timer' as const, color: '#22C55E' },
 ];
 
 export function ProfileScreen() {
@@ -73,6 +75,13 @@ export function ProfileScreen() {
       contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 14 }]}
       showsVerticalScrollIndicator={false}
     >
+      <Header
+        title="Profile"
+        subtitle="Your account"
+        back
+        onBack={() => navigation.navigate('Home' as never)}
+      />
+
       <FadeUp index={0}>
         <View
           style={[
@@ -117,19 +126,28 @@ export function ProfileScreen() {
 
       <View style={styles.statsGrid}>
         {STAT_META.map((s, i) => (
-          <FadeUp key={s.label} index={i + 1}>
-            <GlassCard style={styles.statCard} blur={14}>
-              <View style={[styles.statIcon, { backgroundColor: s.color + '26' }]}>
-                <MaterialIcons name={s.icon} size={20} color={s.color} />
+          <View key={s.label} style={styles.statCell}>
+            <FadeUp index={i + 1}>
+              <View style={styles.statCard}>
+                <BlurView
+                  intensity={24}
+                  tint="dark"
+                  style={StyleSheet.absoluteFill}
+                />
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.01)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 0, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                />
+                <View style={[styles.statIcon, { backgroundColor: s.color + '1F' }]}>
+                  <MaterialIcons name={s.icon} size={20} color={s.color} />
+                </View>
+                <Text style={styles.statValue}>{statValues[s.value]}</Text>
+                <Text style={styles.statLabel}>{s.label}</Text>
               </View>
-              <Text style={[styles.statValue, { color: theme.textPrimary }]}>
-                {statValues[s.value]}
-              </Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
-                {s.label}
-              </Text>
-            </GlassCard>
-          </FadeUp>
+            </FadeUp>
+          </View>
         ))}
       </View>
 
@@ -231,23 +249,48 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 6,
   },
-  statCard: {
+  statCell: {
     flex: 1,
-    minWidth: '45%',
+    minWidth: 148,
+  },
+  statCard: {
+    alignSelf: 'stretch',
     alignItems: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 8,
+    paddingVertical: 20,
+    paddingHorizontal: 12,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: 'rgba(37,31,50,0.72)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 4,
+    overflow: 'hidden',
   },
   statIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  statValue: { ...typography.h3 },
-  statLabel: { ...typography.caption, marginTop: 2 },
+  statValue: {
+    ...typography.h3,
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  statLabel: {
+    ...typography.caption,
+    color: 'rgba(255,255,255,0.55)',
+    marginTop: 3,
+  },
   menuGroup: { marginTop: 14, gap: 12 },
   menuCard: {
     flexDirection: 'row',

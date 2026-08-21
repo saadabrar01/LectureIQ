@@ -33,6 +33,16 @@ yarn-error.*
 # local env files
 .env*.local
 
+# backend (FastAPI)
+backend/.env
+backend/.venv/
+backend/uploads/
+__pycache__/
+*.pyc
+
+# local build checks
+/dist-check-web/
+
 # typescript
 *.tsbuildinfo
 

@@ -14,7 +14,9 @@ import { VoiceModal } from '../screens/VoiceModal';
 import { AddNoteScreen } from '../screens/AddNoteScreen';
 import { SummaryScreen } from '../screens/SummaryScreen';
 import { QuizScreen } from '../screens/QuizScreen';
+import { QuizConfigScreen } from '../screens/QuizConfigScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { DocumentsScreen } from '../screens/DocumentsScreen';
 import { MainTabs } from './MainTabs';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -52,7 +54,17 @@ export function RootNavigator() {
       />
       <Stack.Screen name="Summary" component={SummaryScreen} />
       <Stack.Screen name="Quiz" component={QuizScreen} />
+      <Stack.Screen
+        name="QuizConfig"
+        component={QuizConfigScreen}
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen
+        name="Documents"
+        component={DocumentsScreen}
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
     </Stack.Navigator>
   );
 }

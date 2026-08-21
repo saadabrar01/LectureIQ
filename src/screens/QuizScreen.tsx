@@ -15,11 +15,14 @@ export function QuizScreen() {
   const { theme } = useAppTheme();
   const navigation = useNavigation();
   const route = useRoute();
-  const { lectureId } = route.params as { lectureId: string };
+  const { lectureId, count } = route.params as {
+    lectureId: string;
+    count?: number;
+  };
 
   const questions = useMemo(
     () =>
-      [...quizQuestions].sort(() => Math.random() - 0.5).slice(0, 5),
+      [...quizQuestions].sort(() => Math.random() - 0.5).slice(0, count ?? 5),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );

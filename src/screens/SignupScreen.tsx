@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -14,6 +14,7 @@ import { AuthDivider } from '../components/auth/AuthDivider';
 import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
 import { AuthRedirect } from '../components/auth/AuthRedirect';
 import { haptics } from '../utils/helpers';
+import { authApi, ApiError } from '../services/api';
 
 export function SignupScreen() {
   const navigation = useNavigation();
@@ -26,7 +27,7 @@ export function SignupScreen() {
 
   const canSubmit = name.trim() && email.trim() && password.trim() && accepted;
 
-  const submit = () => {
+  const submit = async () => {
     const next: { name?: string; email?: string; password?: string } = {};
     if (!name.trim()) next.name = 'Enter your full name';
     if (!email.trim()) next.email = 'Enter your email';
@@ -38,11 +39,23 @@ export function SignupScreen() {
     }
     haptics.light();
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      await authApi.signUp(name.trim(), email.trim(), password);
       haptics.success();
-      navigation.navigate('Main');
-    }, 900);
+      navigation.navigate('Main' as never);
+    } catch (err) {
+      const apiErr = err as ApiError;
+      haptics.warning();
+      if (apiErr.status === 409 || /email/i.test(apiErr.message)) {
+        setErrors({ email: apiErr.message });
+      } else if (/password/i.test(apiErr.message)) {
+        setErrors({ password: apiErr.message });
+      } else {
+        Alert.alert('Sign up failed', apiErr.message);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
