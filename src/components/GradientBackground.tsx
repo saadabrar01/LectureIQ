@@ -48,7 +48,7 @@ export function GradientBackground({
   const finalColors = colors ?? ['#8EF0A3', '#2FA866'];
 
   return (
-    <View style={styles.container} pointerEvents={pointer}>
+    <View style={[styles.container, { pointerEvents: pointer }]}>
       <Animated.View style={[StyleSheet.absoluteFill, animated && animStyle]}>
         <LinearGradient
           colors={[...finalColors]}

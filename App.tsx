@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
@@ -14,6 +14,18 @@ import {
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import { ThemeProvider, useAppTheme } from './src/context/ThemeContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
+
+if (Platform.OS === 'web') {
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    const msg = typeof args[0] === 'string' ? args[0] : '';
+    if (
+      msg.includes('shadow*') ||
+      msg.includes('boxShadow')
+    ) return;
+    originalWarn(...args);
+  };
+}
 
 function AppContent() {
   const { theme, mode } = useAppTheme();

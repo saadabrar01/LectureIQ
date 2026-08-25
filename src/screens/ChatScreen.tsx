@@ -202,8 +202,7 @@ export function ChatScreen() {
           />
 
           <View
-            style={[styles.inputBar, { paddingBottom: insets.bottom + 12 }]}
-            pointerEvents="box-none"
+            style={[styles.inputBar, { paddingBottom: insets.bottom + 12, pointerEvents: 'box-none' }]}
           >
             <View style={styles.inputPill}>
               <TextInput

@@ -189,8 +189,7 @@ export function QuizConfigScreen() {
         </ScrollView>
 
         <View
-          style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}
-          pointerEvents="box-none"
+          style={[styles.footer, { paddingBottom: insets.bottom + 16, pointerEvents: 'box-none' }]}
         >
           <AppButton
             title="Generate Quiz"

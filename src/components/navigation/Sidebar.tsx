@@ -99,7 +99,7 @@ function DockItem({
       </Animated.View>
 
       {/* Tooltip label on hover */}
-      <Animated.View style={[styles.tooltip, tooltipStyle]} pointerEvents="none">
+      <Animated.View style={[styles.tooltip, tooltipStyle, { pointerEvents: 'none' }]}>
         <Text style={styles.tooltipText}>{label}</Text>
       </Animated.View>
     </Pressable>
