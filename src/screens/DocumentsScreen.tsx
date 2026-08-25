@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -14,19 +13,48 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as DocumentPicker from 'expo-document-picker';
+import Animated, { FadeInDown, FadeOutRight } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../context/ThemeContext';
 import { typography } from '../theme/typography';
-import { GlassCard } from '../components/GlassCard';
 import { FadeUp } from '../components/FadeUp';
 import { Header } from '../components/Header';
 import { haptics } from '../utils/helpers';
 import { documentsApi, ApiError, IndexedDocument, AskRagResult } from '../services/api';
 
 const MAX_MB = 20;
+const MINT = '#22C55E';
+const MINT_BRIGHT = '#34D399';
+const CARD_BG = 'rgba(38,38,38,0.85)';
+const HAIRLINE = 'rgba(255,255,255,0.08)';
 const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHrs = Math.floor(diffMins / 60);
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  const diffDays = Math.floor(diffHrs / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const TYPE_COLORS: Record<string, { bg: string; fg: string; label: string }> = {
+  pdf: { bg: 'rgba(142,160,232,0.16)', fg: '#8EA6E8', label: 'PDF' },
+  docx: { bg: 'rgba(56,207,168,0.16)', fg: '#38CFA8', label: 'DOCX' },
+};
 
 export function DocumentsScreen() {
   const { theme } = useAppTheme();
@@ -39,12 +67,15 @@ export function DocumentsScreen() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [result, setResult] = useState<AskRagResult | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
     try {
       setDocs(await documentsApi.list());
     } catch (err) {
-      alertError(err, 'Could not load documents');
+      setError((err as ApiError)?.message ?? 'Could not load documents');
     } finally {
       setLoadingDocs(false);
     }
@@ -54,10 +85,11 @@ export function DocumentsScreen() {
     refresh();
   }, [refresh]);
 
-  const alertError = (err: unknown, fallback: string) => {
-    const apiErr = err as ApiError;
-    Alert.alert(fallback, apiErr?.message ?? 'Something went wrong.');
-  };
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(''), 3000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   const pickAndUpload = async () => {
     haptics.light();
@@ -70,12 +102,12 @@ export function DocumentsScreen() {
       if (!asset) return;
 
       if ((asset.size ?? 0) > MAX_MB * 1024 * 1024) {
-        Alert.alert('File too large', `Maximum size is ${MAX_MB} MB.`);
+        setError(`File too large. Maximum size is ${MAX_MB} MB.`);
         return;
       }
 
       setUploading(true);
-      const uploaded = await documentsApi.upload({
+      await documentsApi.upload({
         uri: asset.uri,
         name: asset.name,
         mimeType: asset.mimeType,
@@ -83,36 +115,37 @@ export function DocumentsScreen() {
       });
       haptics.success();
       await refresh();
-      Alert.alert(
-        'Document indexed',
-        `${asset.name}\n${uploaded.pages} page(s) - ${uploaded.chunks_stored} chunk(s) stored. You can now ask questions about it.`,
-      );
     } catch (err) {
       haptics.warning();
-      alertError(err, 'Upload failed');
+      setError((err as ApiError)?.message ?? 'Upload failed');
     } finally {
       setUploading(false);
     }
   };
 
-  const removeDoc = (doc: IndexedDocument) => {
+  const handleDelete = async (doc: IndexedDocument) => {
     haptics.light();
-    Alert.alert('Delete document', `Remove "${doc.file_name}" and its chunks?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await documentsApi.remove(doc.id);
-            setResult(null);
-            await refresh();
-          } catch (err) {
-            alertError(err, 'Delete failed');
-          }
-        },
-      },
-    ]);
+    setConfirmDeleteId(doc.id);
+  };
+
+  const confirmDelete = async (doc: IndexedDocument) => {
+    haptics.warning();
+    setDeletingId(doc.id);
+    try {
+      await documentsApi.remove(doc.id);
+      setResult(null);
+      setDocs((prev) => prev.filter((d) => d.id !== doc.id));
+    } catch (err) {
+      setError((err as ApiError)?.message ?? 'Delete failed');
+    } finally {
+      setDeletingId(null);
+      setConfirmDeleteId(null);
+    }
+  };
+
+  const cancelDelete = () => {
+    haptics.light();
+    setConfirmDeleteId(null);
   };
 
   const ask = async () => {
@@ -124,43 +157,11 @@ export function DocumentsScreen() {
       setResult(await documentsApi.ask(q));
     } catch (err) {
       haptics.warning();
-      alertError(err, 'Could not answer');
+      setError((err as ApiError)?.message ?? 'Could not answer');
     } finally {
       setAsking(false);
     }
   };
-
-  const renderDocRow = (doc: IndexedDocument) => (
-    <GlassCard key={doc.id} style={styles.docCard} blur={14}>
-      <View
-        style={[
-          styles.docIcon,
-          { backgroundColor: doc.file_type === 'pdf' ? '#8EA6E826' : '#38CFA826' },
-        ]}
-      >
-        <MaterialIcons
-          name={doc.file_type === 'pdf' ? 'picture-as-pdf' : 'description'}
-          size={20}
-          color={doc.file_type === 'pdf' ? '#8EA6E8' : '#38CFA8'}
-        />
-      </View>
-      <View style={styles.docBody}>
-        <Text style={[styles.docName, { color: theme.textPrimary }]} numberOfLines={1}>
-          {doc.file_name}
-        </Text>
-        <Text style={[styles.docMeta, { color: theme.textSecondary }]}>
-          {doc.num_pages} page(s) - {doc.num_chunks} chunk(s)
-        </Text>
-      </View>
-      <Pressable
-        onPress={() => removeDoc(doc)}
-        style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.6 }]}
-        hitSlop={8}
-      >
-        <MaterialIcons name="delete-outline" size={20} color={theme.error} />
-      </Pressable>
-    </GlassCard>
-  );
 
   return (
     <ScrollView
@@ -175,6 +176,16 @@ export function DocumentsScreen() {
         back
         onBack={() => navigation.goBack()}
       />
+
+      {error ? (
+        <Animated.View entering={FadeInDown.duration(250)} style={[styles.banner, { borderColor: '#EF444444' }]}>
+          <MaterialIcons name="error-outline" size={16} color="#EF4444" />
+          <Text style={styles.bannerText}>{error}</Text>
+          <Pressable onPress={() => setError('')} hitSlop={6}>
+            <MaterialIcons name="close" size={14} color="#EF4444" />
+          </Pressable>
+        </Animated.View>
+      ) : null}
 
       {/* Upload CTA */}
       <FadeUp index={0}>
@@ -210,7 +221,7 @@ export function DocumentsScreen() {
         </Pressable>
       </FadeUp>
 
-      {/* Indexed documents */}
+      {/* Your Documents */}
       <View style={styles.sectionRow}>
         <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>
           Your Documents
@@ -219,14 +230,110 @@ export function DocumentsScreen() {
           {docs.length}
         </Text>
       </View>
+
       {loadingDocs ? (
         <ActivityIndicator color="#8EF0A3" style={styles.loader} />
       ) : docs.length === 0 ? (
-        <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-          No documents yet. Upload a PDF or DOCX above to get started.
-        </Text>
+        <View style={styles.emptyCard}>
+          <BlurView intensity={14} tint="dark" style={StyleSheet.absoluteFill} />
+          <MaterialIcons name="folder-open" size={36} color="rgba(255,255,255,0.18)" />
+          <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
+            No documents yet
+          </Text>
+          <Text style={[styles.emptyDesc, { color: 'rgba(255,255,255,0.35)' }]}>
+            Upload a PDF or DOCX above to get started.
+          </Text>
+        </View>
       ) : (
-        <View style={styles.docList}>{docs.map(renderDocRow)}</View>
+        <View style={styles.docList}>
+          {docs.map((doc) => {
+            const type = TYPE_COLORS[doc.file_type] ?? TYPE_COLORS.pdf;
+            const isDeleting = deletingId === doc.id;
+            const isConfirming = confirmDeleteId === doc.id;
+
+            return (
+              <Animated.View
+                key={doc.id}
+                entering={FadeInDown.duration(300)}
+                exiting={FadeOutRight.duration(300)}
+              >
+                <View
+                  style={[
+                    styles.docCard,
+                    isDeleting && { opacity: 0.5 },
+                  ]}
+                >
+                  <BlurView intensity={16} tint="dark" style={StyleSheet.absoluteFill} />
+
+                  {/* Document icon */}
+                  <View style={[styles.docIcon, { backgroundColor: type.bg, borderColor: type.fg + '33' }]}>
+                    <MaterialIcons
+                      name={doc.file_type === 'pdf' ? 'picture-as-pdf' : 'description'}
+                      size={22}
+                      color={type.fg}
+                    />
+                  </View>
+
+                  {/* Info */}
+                  <View style={styles.docBody}>
+                    <Text style={[styles.docName, { color: theme.textPrimary }]} numberOfLines={1}>
+                      {doc.file_name}
+                    </Text>
+                    <View style={styles.docMetaRow}>
+                      <Text style={[styles.docMeta, { color: theme.textSecondary }]}>
+                        {formatBytes(doc.file_size)}
+                      </Text>
+                      <Text style={[styles.docDot, { color: 'rgba(255,255,255,0.2)' }]}>·</Text>
+                      <Text style={[styles.docMeta, { color: theme.textSecondary }]}>
+                        {doc.num_pages} page{doc.num_pages !== 1 ? 's' : ''}
+                      </Text>
+                      <Text style={[styles.docDot, { color: 'rgba(255,255,255,0.2)' }]}>·</Text>
+                      <Text style={[styles.docMeta, { color: theme.textSecondary }]}>
+                        {formatDate(doc.created_at)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Format badge */}
+                  <View style={[styles.badge, { backgroundColor: type.bg, borderColor: type.fg + '33' }]}>
+                    <Text style={[styles.badgeText, { color: type.fg }]}>{type.label}</Text>
+                  </View>
+
+                  {/* Delete button */}
+                  {isConfirming ? (
+                    <View style={styles.confirmRow}>
+                      <Pressable
+                        onPress={cancelDelete}
+                        style={({ pressed }) => [styles.confirmBtn, pressed && { opacity: 0.7 }]}
+                      >
+                        <Text style={styles.confirmCancel}>Cancel</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => confirmDelete(doc)}
+                        style={({ pressed }) => [styles.confirmBtnDelete, pressed && { opacity: 0.7 }]}
+                      >
+                        <MaterialIcons name="delete" size={14} color="#fff" />
+                        <Text style={styles.confirmDeleteText}>Delete</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable
+                      onPress={() => handleDelete(doc)}
+                      disabled={isDeleting}
+                      style={({ pressed }) => [
+                        styles.deleteBtn,
+                        pressed && { transform: [{ scale: 0.9 }] },
+                      ]}
+                      hitSlop={8}
+                    >
+                      <MaterialIcons name="delete-outline" size={19} color="#EF4444" />
+                    </Pressable>
+                  )}
+                </View>
+              </Animated.View>
+            );
+          })}
+        </View>
       )}
 
       {/* Ask section */}
@@ -272,9 +379,15 @@ export function DocumentsScreen() {
       {result ? (
         <FadeUp index={3}>
           <View style={styles.answerCard}>
-            <BlurOverlay />
+            <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
+            <LinearGradient
+              colors={['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.01)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
             <View style={styles.answerHead}>
-              <MaterialIcons name="auto-awesome" size={16} color="#8EF0A3" />
+              <MaterialIcons name="auto-awesome" size={16} color={MINT_BRIGHT} />
               <Text style={styles.answerLabel}>AI Answer</Text>
               {result.answer_source !== 'llm' ? (
                 <View style={styles.sourceBadge}>
@@ -288,7 +401,7 @@ export function DocumentsScreen() {
                 <Text style={styles.sourcesTitle}>Sources</Text>
                 {result.sources.map((s) => (
                   <View key={s.document_id} style={styles.sourceChip}>
-                    <MaterialIcons name="menu-book" size={12} color="#8EF0A3" />
+                    <MaterialIcons name="menu-book" size={12} color={MINT_BRIGHT} />
                     <Text style={styles.sourceChipText} numberOfLines={1}>
                       {s.file_name}
                       {s.page_numbers.length > 0
@@ -310,21 +423,6 @@ export function DocumentsScreen() {
   );
 }
 
-// Subtle glass sheen shared by the answer card.
-function BlurOverlay() {
-  return (
-    <>
-      <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
-      <LinearGradient
-        colors={['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.01)']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-    </>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: {
@@ -334,6 +432,17 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  bannerText: { ...typography.bodySmall, color: '#EF4444', flex: 1 },
   uploadCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -370,33 +479,105 @@ const styles = StyleSheet.create({
   sectionTitle: { ...typography.h3 },
   sectionCount: { ...typography.caption },
   loader: { marginVertical: 20 },
-  emptyText: { ...typography.bodySmall, lineHeight: 20 },
+  emptyCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: HAIRLINE,
+    backgroundColor: CARD_BG,
+    overflow: 'hidden',
+    gap: 8,
+  },
+  emptyTitle: { ...typography.bodySemi, marginTop: 8 },
+  emptyDesc: { ...typography.bodySmall, textAlign: 'center', lineHeight: 20 },
   docList: { gap: 10 },
   docCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 12,
+    padding: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: HAIRLINE,
+    backgroundColor: CARD_BG,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   docIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 46,
+    height: 46,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   docBody: { flex: 1 },
   docName: { ...typography.bodySemi },
-  docMeta: { ...typography.caption, marginTop: 2 },
+  docMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 3,
+  },
+  docMeta: { ...typography.caption },
+  docDot: { ...typography.caption, fontSize: 10 },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  badgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
   deleteBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,107,107,0.12)',
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  confirmBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  confirmCancel: {
+    ...typography.caption,
+    color: 'rgba(255,255,255,0.55)',
+  },
+  confirmBtnDelete: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(239,68,68,0.85)',
+  },
+  confirmDeleteText: {
+    ...typography.caption,
+    color: '#fff',
+    fontWeight: '700',
   },
   askRow: {
     flexDirection: 'row',
