@@ -26,7 +26,6 @@ interface SidebarProps {
 const ITEMS: { key: string; label: string; icon: string; iconOff: string }[] = [
   { key: 'Home', label: 'Home', icon: 'home', iconOff: 'home' },
   { key: 'Notes', label: 'Notes', icon: 'sticky-note-2', iconOff: 'sticky-note-2' },
-  { key: 'Search', label: 'Search', icon: 'search', iconOff: 'search' },
   { key: 'Library', label: 'Library', icon: 'library-books', iconOff: 'library-books' },
   { key: 'Profile', label: 'Profile', icon: 'person', iconOff: 'person-outline' },
 ];

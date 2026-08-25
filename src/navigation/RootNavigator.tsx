@@ -17,6 +17,7 @@ import { QuizScreen } from '../screens/QuizScreen';
 import { QuizConfigScreen } from '../screens/QuizConfigScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { DocumentsScreen } from '../screens/DocumentsScreen';
+import { DocumentChatScreen } from '../screens/DocumentChatScreen';
 import { MainTabs } from './MainTabs';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -64,6 +65,11 @@ export function RootNavigator() {
         name="Documents"
         component={DocumentsScreen}
         options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
+      <Stack.Screen
+        name="DocumentChat"
+        component={DocumentChatScreen}
+        options={{ animation: 'slide_from_right' }}
       />
     </Stack.Navigator>
   );

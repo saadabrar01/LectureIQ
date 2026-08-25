@@ -13,8 +13,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -38,18 +40,34 @@ from app.services.llm import generate_answer
 from app.services.text_extraction import extract_pages
 
 router = APIRouter(tags=["rag"])
+limiter = Limiter(key_func=get_remote_address)
 
-ALLOWED_TYPES = {"pdf": "pdf", "docx": "docx"}
+ALLOWED_TYPES = {"pdf": "pdf", "docx": "docx", "doc": "docx"}
 
 
 @router.post("/upload-doc", response_model=UploadDocResponse, status_code=201)
-async def upload_doc(file: UploadFile = File(...), db: Session = Depends(get_db)):
+@limiter.limit("10/hour")
+async def upload_doc(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Index an uploaded PDF or DOCX document for retrieval."""
     # --- Validate file type -------------------------------------------------
-    suffix = (file.filename or "").rsplit(".", 1)[-1].lower()
-    if suffix not in ALLOWED_TYPES:
+    raw_suffix = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if raw_suffix not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=415, detail="Only PDF and DOCX files are supported."
+        )
+    suffix = ALLOWED_TYPES[raw_suffix]
+
+    # --- Validate Content-Type header if provided ----------------------------
+    if file.content_type and file.content_type not in (
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+        "application/octet-stream",
+        "",
+    ):
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unexpected content type: {file.content_type}",
         )
 
     # --- Read and size-check the upload -------------------------------------
@@ -118,7 +136,8 @@ async def upload_doc(file: UploadFile = File(...), db: Session = Depends(get_db)
 
 
 @router.post("/ask-rag", response_model=AskRagResponse)
-def ask_rag(payload: AskRagRequest, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+def ask_rag(request: Request, payload: AskRagRequest, db: Session = Depends(get_db)):
     """Answer a question using similarity search over indexed documents."""
     question = payload.question.strip()
     if not question:
@@ -221,9 +240,18 @@ def download_document(document_id: int, db: Session = Depends(get_db)):
     document = db.get(Document, document_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    path = Path(document.file_path)
-    if not document.file_path or not path.exists():
+    if not document.file_path:
         raise HTTPException(status_code=410, detail="Original file is no longer stored.")
+
+    path = Path(document.file_path)
+    uploads_root = Path(settings.uploads_dir).resolve()
+
+    # Path traversal protection: resolved path must be inside uploads_dir
+    if not path.resolve().is_relative_to(uploads_root):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    if not path.exists():
+        raise HTTPException(status_code=410, detail="Original file is no longer stored.")
+
     return FileResponse(path, filename=document.file_name)
 
 
@@ -241,7 +269,8 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/documents/{document_id}/ask", response_model=AskRagResponse)
-def ask_document(document_id: int, payload: AskRagRequest, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+def ask_document(request: Request, document_id: int, payload: AskRagRequest, db: Session = Depends(get_db)):
     """Answer a question scoped to a single document."""
     document = db.get(Document, document_id)
     if document is None:

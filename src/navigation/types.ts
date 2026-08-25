@@ -17,6 +17,7 @@ export type RootStackParamList = {
   QuizConfig: { lectureId: string };
   Settings: undefined;
   Documents: undefined;
+  DocumentChat: { documentId: number; documentName: string; fileType: string };
 };
 
 export type MainTabParamList = {

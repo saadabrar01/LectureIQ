@@ -83,7 +83,17 @@ def cosine_rank(
 
     scored = []
     for chunk in chunks:
-        vec = [float(x) for x in chunk.embedding]
+        try:
+            raw = chunk.embedding
+            # JSONB can return a list, or a JSON string that needs parsing
+            if isinstance(raw, str):
+                import json
+                raw = json.loads(raw)
+            if raw is None:
+                continue
+            vec = [float(x) for x in raw]
+        except Exception:
+            continue
         scored.append((chunk, chunk.document, _cosine(query_vector, vec)))
     scored.sort(key=lambda row: row[2])
     return scored[:top_k]

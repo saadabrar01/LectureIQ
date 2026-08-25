@@ -6,6 +6,8 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -29,6 +31,7 @@ interface LibraryItem {
   date: string;
   sizeLabel: string;
   badge: string;
+  fileType?: string;
 }
 
 const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
@@ -69,8 +72,13 @@ export function LibraryScreen() {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { width } = useWindowDimensions();
+
+  // 3 cards per row on wide screens, 2 on medium, 1 on small mobile
+  const numColumns = width > 768 ? 3 : width > 480 ? 2 : 1;
 
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -90,6 +98,7 @@ export function LibraryScreen() {
         date: formatDate(d.created_at),
         sizeLabel: formatBytes(d.file_size),
         badge: (d.file_type ?? 'PDF').toUpperCase(),
+        fileType: d.file_type ?? 'pdf',
       }));
 
       const videoItems: LibraryItem[] = lectures.map((l) => ({
@@ -126,10 +135,19 @@ export function LibraryScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const filtered = useMemo(
-    () => (filter === 'all' ? items : items.filter((i) => i.type === filter)),
-    [items, filter]
-  );
+  const filtered = useMemo(() => {
+    let res = filter === 'all' ? items : items.filter((i) => i.type === filter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      res = res.filter(
+        (i) =>
+          i.name.toLowerCase().includes(q) ||
+          i.badge.toLowerCase().includes(q) ||
+          i.sizeLabel.toLowerCase().includes(q)
+      );
+    }
+    return res;
+  }, [items, filter, searchQuery]);
 
   const handleDelete = async (item: LibraryItem) => {
     haptics.warning();
@@ -147,7 +165,11 @@ export function LibraryScreen() {
     haptics.light();
     const [type, rawId] = item.id.split(':');
     if (type === 'document') {
-      navigation.navigate('Documents');
+      navigation.navigate('DocumentChat', {
+        documentId: Number(rawId),
+        documentName: item.name,
+        fileType: item.fileType ?? 'pdf',
+      });
     } else {
       navigation.navigate('Chat', { lectureId: rawId });
     }
@@ -176,6 +198,30 @@ export function LibraryScreen() {
           <Text style={styles.bannerText}>{error}</Text>
         </View>
       ) : null}
+
+      {/* In-Place Search Bar */}
+      <View style={styles.searchWrap}>
+        <MaterialIcons name="search" size={20} color="rgba(255,255,255,0.4)" />
+        <TextInput
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search documents or lectures..."
+          placeholderTextColor="rgba(255,255,255,0.38)"
+          style={[styles.searchInput, { color: theme.textPrimary }]}
+        />
+        {searchQuery ? (
+          <Pressable
+            onPress={() => {
+              haptics.light();
+              setSearchQuery('');
+            }}
+            hitSlop={8}
+            style={styles.clearSearchBtn}
+          >
+            <MaterialIcons name="close" size={16} color="rgba(255,255,255,0.5)" />
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.filterRow}>
         {FILTERS.map((f) => (
@@ -209,9 +255,12 @@ export function LibraryScreen() {
       </View>
 
       <FlatList
+        key={numColumns}
+        numColumns={numColumns}
         data={filtered}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        columnWrapperStyle={numColumns > 1 ? styles.columnWrapper : undefined}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -235,10 +284,12 @@ export function LibraryScreen() {
           <View style={styles.emptyCard}>
             <MaterialIcons name="folder-open" size={36} color="rgba(255,255,255,0.18)" />
             <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
-              No sources yet
+              {searchQuery ? 'No matching sources found' : 'No sources yet'}
             </Text>
             <Text style={[styles.emptyDesc, { color: 'rgba(255,255,255,0.35)' }]}>
-              Upload documents or add lectures to see them here.
+              {searchQuery
+                ? `No documents or lectures match "${searchQuery}".`
+                : 'Upload documents or add lectures to see them here.'}
             </Text>
           </View>
         }
@@ -271,6 +322,30 @@ const styles = StyleSheet.create({
     marginHorizontal: 28,
   },
   bannerText: { ...typography.bodySmall, color: '#EF4444', flex: 1 },
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(37,31,50,0.72)',
+    marginHorizontal: 28,
+    marginBottom: 14,
+    maxWidth: 1152,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 2,
+  },
+  clearSearchBtn: {
+    padding: 2,
+  },
   filterRow: {
     flexDirection: 'row',
     gap: 8,
@@ -301,6 +376,9 @@ const styles = StyleSheet.create({
     maxWidth: 1152,
     width: '100%',
     alignSelf: 'center',
+  },
+  columnWrapper: {
+    gap: 16,
   },
   emptyCard: {
     alignItems: 'center',

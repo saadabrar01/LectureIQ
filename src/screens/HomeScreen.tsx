@@ -1,7 +1,10 @@
-import React from "react";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
+  Image,
   ImageBackground,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -10,7 +13,8 @@ import {
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
-import { useNavigation } from "@react-navigation/native";
+import * as DocumentPicker from "expo-document-picker";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppTheme } from "../context/ThemeContext";
 import { typography } from "../theme/typography";
@@ -19,28 +23,29 @@ import { StatusBadge } from "../components/StatusBadge";
 import { GlassCard } from "../components/GlassCard";
 import { FadeUp, GlowChip } from "../components/FadeUp";
 import { timeAgo, formatClock, haptics } from "../utils/helpers";
+import { authApi, documentsApi, getAvatarUrl, type AuthUser } from "../services/api";
 import type { Lecture } from "../data/mock";
 
 const STAT_CARDS = [
   {
     key: "lectures" as const,
     icon: "library-books" as const,
-    title: "Lecture",
-    desc: "Access your lectures and learning materials.",
+    title: "Lectures",
+    desc: "Browse your indexed video lectures.",
     gradient: ["#35D47A", "#22C55E"],
   },
   {
     key: "questions" as const,
     icon: "question-answer" as const,
-    title: "Question",
-    desc: "Ask questions and get helpful answers.",
-    gradient: ["#35D47A", "#38CFA8"],
+    title: "Q&A Chat",
+    desc: "Ask AI questions about your content.",
+    gradient: ["#34D399", "#2FA866"],
   },
   {
     key: "processing" as const,
-    icon: "auto-fix-high" as const,
-    title: "Processing",
-    desc: "Process and analyze your learning content.",
+    icon: "description" as const,
+    title: "Knowledge Base",
+    desc: "Interact with uploaded PDF/DOC notes.",
     gradient: ["#8EA6E8", "#38CFA8"],
   },
 ];
@@ -50,9 +55,28 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
 
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [docError, setDocError] = useState("");
+
+  const loadUser = useCallback(async () => {
+    try {
+      const u = await authApi.getMe().catch(() => null);
+      if (u) setUser(u);
+    } catch {
+      // fallback to mock profile
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUser();
+    }, [loadUser])
+  );
+
   const openLecture = (lecture: Lecture) => {
     haptics.light();
-    navigation.navigate("LectureDetail", { lectureId: lecture.id });
+    (navigation as any).navigate("LectureDetail", { lectureId: lecture.id });
   };
 
   const handleStatCardPress = (key: "lectures" | "questions" | "processing") => {
@@ -61,45 +85,192 @@ export function HomeScreen() {
       const firstLectureId = lectures[0]?.id || "1";
       (navigation as any).navigate("Chat", { lectureId: firstLectureId });
     } else if (key === "lectures") {
-      (navigation as any).navigate("Search");
+      (navigation as any).navigate("Library");
     } else if (key === "processing") {
-      (navigation as any).navigate("AddLecture");
+      (navigation as any).navigate("Documents");
     }
   };
 
+  const handlePickDocument = async () => {
+    haptics.light();
+    try {
+      setDocError("");
+      const res = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/pdf",
+          "application/msword",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "application/octet-stream",
+          "*/*",
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      const asset = res.canceled ? undefined : res.assets?.[0];
+      if (!asset) return;
+
+      setUploadingDoc(true);
+      const uploaded = await documentsApi.upload({
+        uri: asset.uri,
+        name: asset.name,
+        mimeType: asset.mimeType,
+        file: Platform.OS === "web" ? (asset as { file?: File }).file : undefined,
+      });
+
+      haptics.success();
+
+      // Open DocumentChat for the uploaded document
+      (navigation as any).navigate("DocumentChat", {
+        documentId: uploaded.document_id,
+        documentName: asset.name || "document.pdf",
+        fileType: asset.name?.endsWith(".docx") ? "docx" : "pdf",
+      });
+    } catch (err: any) {
+      haptics.warning();
+      setDocError(err?.message || "Failed to upload document");
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  const handleAddVideo = () => {
+    haptics.light();
+    (navigation as any).navigate("AddLecture");
+  };
+
+  const displayName = user?.name || userProfile.name;
+  const displayAvatarUrl = getAvatarUrl(user?.avatar_url);
+  const displayAvatarText = user?.avatar || userProfile.avatar;
+
   const renderHeader = () => (
     <>
+      {/* Top Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={[styles.greeting, { color: theme.textSecondary }]}>
-            Welcome back
+        <View style={styles.headerLeft}>
+          <Text style={[styles.greeting, { color: "rgba(255,255,255,0.55)" }]}>
+            Welcome back 👋
           </Text>
-          <Text style={[styles.name, { color: theme.textPrimary }]}>
-            {userProfile.name}
+          <Text style={[styles.name, { color: "#F5F7F6" }]}>
+            {displayName}
           </Text>
         </View>
         <Pressable
-          onPress={() => navigation.navigate("Profile" as never)}
+          onPress={() => (navigation as any).navigate("Profile")}
           style={({ pressed }) => [
             styles.profileBtn,
             {
-              borderColor: "rgba(255,255,255,0.08)",
-              backgroundColor: "rgba(23,23,23,0.5)",
+              borderColor: "rgba(53,212,122,0.3)",
+              backgroundColor: "rgba(37,31,50,0.72)",
             },
             pressed && { transform: [{ scale: 0.94 }], opacity: 0.85 },
           ]}
         >
-          <MaterialIcons
-            name="person-outline"
-            size={22}
-            color={theme.textSecondary}
-          />
+          {displayAvatarUrl ? (
+            <Image source={{ uri: displayAvatarUrl }} style={styles.profileAvatarImg} />
+          ) : (
+            <LinearGradient
+              colors={["#35D47A", "#22C55E"]}
+              style={styles.profileAvatarGradient}
+            >
+              <Text style={styles.profileAvatarText}>{displayAvatarText}</Text>
+            </LinearGradient>
+          )}
         </Pressable>
       </View>
 
+      {/* Error Alert */}
+      {docError ? (
+        <View style={styles.errorBanner}>
+          <MaterialIcons name="error-outline" size={16} color="#EF4444" />
+          <Text style={styles.errorText}>{docError}</Text>
+          <Pressable onPress={() => setDocError("")} hitSlop={6}>
+            <MaterialIcons name="close" size={16} color="#EF4444" />
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* DUAL UPLOAD CHOICE BANNER (SIDE-BY-SIDE: DOCS vs VIDEO) */}
+      <FadeUp index={0}>
+        <View style={styles.dualUploadWrap}>
+          <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
+          <LinearGradient
+            colors={["rgba(255,255,255,0.05)", "rgba(255,255,255,0.01)"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+
+          <View style={styles.dualUploadHeader}>
+            <MaterialIcons name="cloud-upload" size={20} color="#22C55E" />
+            <Text style={styles.dualUploadTitle}>Upload Content</Text>
+            <Text style={styles.dualUploadSub}>Choose what you want to study</Text>
+          </View>
+
+          <View style={styles.dualUploadRow}>
+            {/* Side 1: Document / Notes (.pdf, .doc) */}
+            <Pressable
+              onPress={handlePickDocument}
+              disabled={uploadingDoc}
+              style={({ pressed }) => [
+                styles.dualUploadCard,
+                styles.dualUploadCardDoc,
+                pressed && { transform: [{ scale: 0.97 }] },
+              ]}
+            >
+              <LinearGradient
+                colors={["#35D47A", "#22C55E"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.dualIconBg}
+              >
+                {uploadingDoc ? (
+                  <ActivityIndicator color="#06281A" size="small" />
+                ) : (
+                  <MaterialIcons name="description" size={24} color="#FFFFFF" />
+                )}
+              </LinearGradient>
+
+              <Text style={styles.dualCardTitle}>Notes & PDF</Text>
+              <Text style={styles.dualCardMeta}>.doc, .docx, .pdf files</Text>
+
+              <View style={styles.dualCardBadge}>
+                <Text style={styles.dualCardBadgeText}>Upload Notes</Text>
+                <MaterialIcons name="add" size={14} color="#35D47A" />
+              </View>
+            </Pressable>
+
+            {/* Side 2: Video Lectures (YouTube) */}
+            <Pressable
+              onPress={handleAddVideo}
+              style={({ pressed }) => [
+                styles.dualUploadCard,
+                styles.dualUploadCardVideo,
+                pressed && { transform: [{ scale: 0.97 }] },
+              ]}
+            >
+              <LinearGradient
+                colors={["#8EA6E8", "#38CFA8"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.dualIconBg}
+              >
+                <MaterialIcons name="smart-display" size={24} color="#FFFFFF" />
+              </LinearGradient>
+
+              <Text style={styles.dualCardTitle}>Video Lecture</Text>
+              <Text style={styles.dualCardMeta}>YouTube video URLs</Text>
+
+              <View style={styles.dualCardBadgeVideo}>
+                <Text style={styles.dualCardBadgeTextVideo}>Add Video</Text>
+                <MaterialIcons name="add" size={14} color="#8EA6E8" />
+              </View>
+            </Pressable>
+          </View>
+        </View>
+      </FadeUp>
+
       {/* Floating stat cards with gradient blobs background */}
       <View style={styles.statsWrap}>
-        {/* Gradient blobs behind cards */}
         <View style={styles.blobContainer}>
           <View style={[styles.blob, styles.blob1]} />
           <View style={[styles.blob, styles.blob2]} />
@@ -111,7 +282,7 @@ export function HomeScreen() {
         <View style={styles.statsRow}>
           {STAT_CARDS.map((s, i) => (
             <View key={s.key} style={styles.statCell}>
-              <FadeUp index={i} delay={80}>
+              <FadeUp index={i + 1} delay={80}>
                 <Pressable
                   onPress={() => handleStatCardPress(s.key)}
                   style={(state) => {
@@ -135,7 +306,6 @@ export function HomeScreen() {
                     end={{ x: 0, y: 1 }}
                     style={StyleSheet.absoluteFill}
                   />
-                  {/* Card icon circle */}
                   <View style={[styles.cardIconWrap]}>
                     <LinearGradient
                       colors={s.gradient as any}
@@ -146,16 +316,13 @@ export function HomeScreen() {
                       <MaterialIcons name={s.icon} size={24} color="#FFFFFF" />
                     </LinearGradient>
                   </View>
-                  {/* Card title */}
                   <Text style={styles.cardTitle}>{s.title}</Text>
-                  {/* Card description */}
                   <Text style={styles.cardDesc}>{s.desc}</Text>
-                  {/* Action arrow */}
                   <View style={styles.cardAction}>
                     <MaterialIcons
                       name="arrow-forward"
                       size={16}
-                      color="rgba(142,240,163,0.75)"
+                      color="#34D399"
                     />
                   </View>
                 </Pressable>
@@ -165,51 +332,13 @@ export function HomeScreen() {
         </View>
       </View>
 
-      {/* Ask-your-documents CTA */}
-      <FadeUp index={3}>
-        <Pressable
-          onPress={() => {
-            haptics.light();
-            navigation.navigate("Documents");
-          }}
-          style={(state) => {
-            const hovered =
-              (state as { hovered?: boolean }).hovered ?? false;
-            return [
-              styles.docsCta,
-              state.pressed && { transform: [{ scale: 0.97 }] },
-              hovered && { borderColor: "rgba(53,212,122,0.45)" },
-            ];
-          }}
-        >
-          <LinearGradient
-            colors={["#35D47A", "#38CFA8"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.docsCtaIcon}
-          >
-            <MaterialIcons name="forum" size={20} color="#06281A" />
-          </LinearGradient>
-          <View style={styles.docsCtaBody}>
-            <Text style={styles.docsCtaTitle}>Chat with your documents</Text>
-            <Text style={styles.docsCtaDesc}>
-              Upload PDF/DOCX and ask AI questions about them
-            </Text>
-          </View>
-          <MaterialIcons
-            name="chevron-right"
-            size={22}
-            color="rgba(142,240,163,0.75)"
-          />
-        </Pressable>
-      </FadeUp>
-
+      {/* Section Header for Recent Lectures */}
       <View style={styles.sectionRow}>
-        <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>
+        <Text style={[styles.sectionTitle, { color: "#F5F7F6" }]}>
           Your Lectures
         </Text>
-        <Pressable onPress={() => navigation.navigate("Search")}>
-          <Text style={[styles.seeAll, { color: theme.primary }]}>See all</Text>
+        <Pressable onPress={() => (navigation as any).navigate("Library")}>
+          <Text style={[styles.seeAll, { color: "#22C55E" }]}>See all</Text>
         </Pressable>
       </View>
     </>
@@ -250,25 +379,25 @@ export function HomeScreen() {
                   />
                   <View style={styles.thumbTopRow}>
                     {item.status === "processing" ? (
-                      <GlowChip color={theme.amber}>
+                      <GlowChip color="#FBBF24">
                         <View
                           style={[
                             styles.progressDot,
-                            { backgroundColor: theme.amber },
+                            { backgroundColor: "#FBBF24" },
                           ]}
                         />
                         <Text
-                          style={[styles.progressText, { color: theme.amber }]}
+                          style={[styles.progressText, { color: "#FBBF24" }]}
                         >
                           {item.progress}%
                         </Text>
                       </GlowChip>
                     ) : item.status === "queued" ? (
-                      <GlowChip color={theme.lavender}>
+                      <GlowChip color="#9F8FF0">
                         <Text
                           style={[
                             styles.progressText,
-                            { color: theme.lavender },
+                            { color: "#9F8FF0" },
                           ]}
                         >
                           Queued
@@ -318,11 +447,11 @@ export function HomeScreen() {
                 <View
                   style={[
                     styles.channelDot,
-                    { backgroundColor: theme.lavender },
+                    { backgroundColor: "#9F8FF0" },
                   ]}
                 />
                 <Text
-                  style={[styles.lectureDate, { color: theme.textSecondary }]}
+                  style={[styles.lectureDate, { color: "rgba(255,255,255,0.55)" }]}
                 >
                   Added {timeAgo(item.addedAt)}
                 </Text>
@@ -331,33 +460,6 @@ export function HomeScreen() {
           </FadeUp>
         )}
       />
-
-      <Pressable
-        onPress={() => {
-          haptics.medium();
-          navigation.navigate("AddLecture");
-        }}
-        style={[
-          styles.fab,
-          {
-            shadowColor: theme.primary,
-            borderColor: theme.glassBorder,
-            backgroundColor: theme.glassBg,
-          },
-        ]}
-      >
-        <LinearGradient
-          colors={[theme.primary, theme.primaryDark]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.fabInner}
-        >
-          <MaterialIcons name="add" size={26} color={theme.primaryDeep} />
-          <Text style={[styles.fabText, { color: theme.primaryDeep }]}>
-            Add Video
-          </Text>
-        </LinearGradient>
-      </Pressable>
     </View>
   );
 }
@@ -375,18 +477,168 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 24,
+    marginBottom: 20,
   },
+  headerLeft: { gap: 2 },
   greeting: { ...typography.caption },
   name: { ...typography.h2, marginTop: 2 },
   profileBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
+  profileAvatarImg: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 22,
+  },
+  profileAvatarGradient: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileAvatarText: {
+    ...typography.bodySemi,
+    color: "#06281A",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(239,68,68,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.3)",
+    marginBottom: 16,
+  },
+  errorText: {
+    ...typography.caption,
+    color: "#EF4444",
+    flex: 1,
+  },
+
+  // Dual Upload Side-by-Side Banner
+  dualUploadWrap: {
+    marginBottom: 24,
+    padding: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(37,31,50,0.72)",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  dualUploadHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 16,
+  },
+  dualUploadTitle: {
+    ...typography.bodySemi,
+    fontSize: 16,
+    color: "#F5F7F6",
+    fontWeight: "700",
+  },
+  dualUploadSub: {
+    ...typography.caption,
+    color: "rgba(255,255,255,0.55)",
+    marginLeft: "auto",
+    fontSize: 11,
+  },
+  dualUploadRow: {
+    flexDirection: "row",
+    gap: 14,
+  },
+  dualUploadCard: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+  },
+  dualUploadCardDoc: {
+    backgroundColor: "rgba(53,212,122,0.08)",
+    borderColor: "rgba(53,212,122,0.25)",
+  },
+  dualUploadCardVideo: {
+    backgroundColor: "rgba(142,166,232,0.08)",
+    borderColor: "rgba(142,166,232,0.25)",
+  },
+  dualIconBg: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  dualCardTitle: {
+    ...typography.bodySemi,
+    fontSize: 14,
+    color: "#F5F7F6",
+    fontWeight: "700",
+    marginBottom: 2,
+    textAlign: "center",
+  },
+  dualCardMeta: {
+    ...typography.caption,
+    fontSize: 11,
+    color: "rgba(255,255,255,0.55)",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  dualCardBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: "rgba(53,212,122,0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(53,212,122,0.3)",
+  },
+  dualCardBadgeText: {
+    ...typography.caption,
+    color: "#35D47A",
+    fontWeight: "700",
+    fontSize: 11,
+  },
+  dualCardBadgeVideo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: "rgba(142,166,232,0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(142,166,232,0.3)",
+  },
+  dualCardBadgeTextVideo: {
+    ...typography.caption,
+    color: "#8EA6E8",
+    fontWeight: "700",
+    fontSize: 11,
+  },
+
+  // Stats Wrap
   statsWrap: {
     marginBottom: 28,
     borderRadius: 24,
@@ -455,7 +707,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.09)",
+    borderColor: "rgba(255,255,255,0.08)",
     backgroundColor: "rgba(37,31,50,0.72)",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
@@ -478,7 +730,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     ...typography.bodySemi,
-    color: "#FFFFFF",
+    color: "#F5F7F6",
     fontSize: 15,
     fontWeight: "700",
     letterSpacing: 0.2,
@@ -499,38 +751,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(53,212,122,0.1)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  docsCta: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 14,
-    marginBottom: 24,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.09)",
-    backgroundColor: "rgba(37,31,50,0.6)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.22,
-    shadowRadius: 14,
-    elevation: 4,
-  },
-  docsCtaIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  docsCtaBody: { flex: 1 },
-  docsCtaTitle: { ...typography.bodySemi, color: "#FFFFFF" },
-  docsCtaDesc: {
-    ...typography.caption,
-    color: "rgba(255,255,255,0.55)",
-    marginTop: 2,
   },
   sectionRow: {
     flexDirection: "row",
@@ -612,25 +832,4 @@ const styles = StyleSheet.create({
   },
   channelDot: { width: 6, height: 6, borderRadius: 3 },
   lectureDate: { ...typography.caption },
-  fab: {
-    position: "absolute",
-    right: 18,
-    bottom: 92,
-    borderRadius: 32,
-    borderWidth: 1,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 12,
-    overflow: "hidden",
-  },
-  fabInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 32,
-  },
-  fabText: { ...typography.bodySemi },
 });

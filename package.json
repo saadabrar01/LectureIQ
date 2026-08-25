@@ -39,7 +39,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "backend": "cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload"
   },
   "private": true
 }

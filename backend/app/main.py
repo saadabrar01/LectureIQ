@@ -1,13 +1,22 @@
 from contextlib import asynccontextmanager
 import logging
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import text
 
 from app.core.config import settings
 from app.db.session import Base, engine
 from app.routers import auth, bookmarks, chat, documents, health, history, lectures, notes, stats
+
+# --- Rate limiter -----------------------------------------------------------
+limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
@@ -19,8 +28,7 @@ async def lifespan(_: FastAPI):
 
     vector_support.detect_and_enable(engine)
 
-    # 2. Resolve the embedding provider (openai -> fastembed -> hashing) so the
-    #    vector column is created with the correct dimensionality.
+    # 2. Resolve embedding provider
     provider, dims = init_embeddings()
     logging.getLogger("lectureiq.rag").info(
         "Embeddings: provider=%s dims=%d | pgvector=%s",
@@ -30,15 +38,23 @@ async def lifespan(_: FastAPI):
     )
     vector_support.adapt_chunk_column(DocumentChunk, dims)
 
-    # 3. Dev convenience: create tables on startup (use Alembic for production)
+    # 3. Create tables on startup
     Base.metadata.create_all(bind=engine)
 
-    # 4. Tiny dev auto-migrations for columns added after first release.
+    # 4. Auto-migrations for user & document columns
     with engine.begin() as conn:
         conn.execute(
             text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_path VARCHAR(1024)")
         )
-        # Lecture chunks table for lecture-level RAG
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255)")
+        )
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT")
+        )
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT")
+        )
         conn.execute(text(
             "CREATE TABLE IF NOT EXISTS lecture_chunks ("
             "id SERIAL PRIMARY KEY, "
@@ -60,14 +76,40 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="LectureIQ API", version="1.0.0", lifespan=lifespan)
 
+# --- Rate limiting ----------------------------------------------------------
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# --- Global request size limit (100 MB max body) ---------------------------
+MAX_BODY_BYTES = 100 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_BODY_BYTES:
+        return JSONResponse(
+            status_code=413,
+            content={"detail": "Request body too large."},
+        )
+    return await call_next(request)
+
+
+# --- Static uploads (served without auth for dev convenience) ----------------
+uploads_dir = Path(settings.uploads_dir)
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+
+# --- CORS -------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list or ["*"],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
+# --- Routers ----------------------------------------------------------------
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(lectures.router, prefix="/api")

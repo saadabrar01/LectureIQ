@@ -17,18 +17,16 @@ import { Sidebar } from '../components/navigation/Sidebar';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-const ICONS: Record<keyof MainTabParamList, [string, string]> = {
+const ICONS: Record<keyof Omit<MainTabParamList, 'Search'>, [string, string]> = {
   Home: ['home', 'home'],
   Notes: ['sticky-note-2', 'sticky-note-2'],
-  Search: ['search', 'search'],
   Library: ['library-books', 'library-books'],
   Profile: ['person', 'person-outline'],
 };
 
-const LABELS: Record<keyof MainTabParamList, string> = {
+const LABELS: Record<keyof Omit<MainTabParamList, 'Search'>, string> = {
   Home: 'Home',
   Notes: 'Notes',
-  Search: 'Search',
   Library: 'Library',
   Profile: 'Profile',
 };
@@ -57,7 +55,7 @@ function ScreenContainer({ children }: { children: React.ReactNode }) {
   return <GlowBackground style={styles.screenContent}>{children}</GlowBackground>;
 }
 
-const WRAPPED: Record<keyof MainTabParamList, React.ComponentType<any>> = {
+const WRAPPED: Record<keyof Omit<MainTabParamList, 'Search'>, React.ComponentType<any>> = {
   Home: (props) => (
     <ScreenContainer>
       <HomeScreen {...props} />
@@ -66,11 +64,6 @@ const WRAPPED: Record<keyof MainTabParamList, React.ComponentType<any>> = {
   Notes: (props) => (
     <ScreenContainer>
       <NotesScreen {...props} />
-    </ScreenContainer>
-  ),
-  Search: (props) => (
-    <ScreenContainer>
-      <SearchScreen {...props} />
     </ScreenContainer>
   ),
   Library: (props) => (
@@ -127,7 +120,8 @@ export function MainTabs() {
         tabBarItemStyle: styles.tabItem,
         tabBarLabelStyle: styles.tabLabel,
         tabBarIcon: ({ focused, color }) => {
-          const [activeIcon, inactiveIcon] = ICONS[route.name];
+          const iconPair = ICONS[route.name as keyof typeof ICONS] ?? ['search', 'search'];
+          const [activeIcon, inactiveIcon] = iconPair;
           return (
             <View
               style={[
@@ -157,7 +151,7 @@ export function MainTabs() {
       })}
     >
       {(
-        Object.keys(ICONS) as Array<keyof MainTabParamList>
+        Object.keys(ICONS) as Array<keyof Omit<MainTabParamList, 'Search'>>
       ).map((name) => (
         <Tab.Screen
           key={name}

@@ -1,9 +1,18 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+
+function getDevHost(): string {
+  const hostUri = Constants.expoConfig?.hostUri;
+  if (hostUri) {
+    const ip = hostUri.split(':')[0];
+    if (ip && ip !== 'localhost' && ip !== '127.0.0.1') return ip;
+  }
+  return Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+}
 
 // EXPO_PUBLIC_API_URL can override the default (e.g. http://192.168.x.x:8001
 // when testing on a physical phone on the same Wi-Fi as the backend).
-const DEV_HOST =
-  Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+const DEV_HOST = getDevHost();
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ?? `http://${DEV_HOST}:8001`;
 
@@ -16,7 +25,10 @@ export interface AuthUser {
   id: number;
   email: string;
   name: string;
+  username?: string | null;
+  bio?: string | null;
   avatar: string;
+  avatar_url?: string | null;
   join_date: string;
   videos_processed: number;
   questions_asked: number;
@@ -49,7 +61,58 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+export function getAvatarUrl(avatarUrl?: string | null): string | undefined {
+  if (!avatarUrl) return undefined;
+  if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://') || avatarUrl.startsWith('data:')) {
+    return avatarUrl;
+  }
+  return `${API_BASE_URL}${avatarUrl.startsWith('/') ? '' : '/'}${avatarUrl}`;
+}
+
 export const authApi = {
+  getMe: () => request<AuthUser>('/api/auth/me'),
+  updateProfile: (data: {
+    name?: string;
+    username?: string;
+    email?: string;
+    bio?: string;
+    avatar_url?: string;
+  }) =>
+    request<AuthUser>('/api/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  uploadAvatar: async (asset: { uri: string; name?: string; mimeType?: string; file?: File }) => {
+    const form = new FormData();
+    const fileName = asset.name || 'avatar.jpg';
+    const mimeType = asset.mimeType || 'image/jpeg';
+
+    if (Platform.OS === 'web') {
+      let blob: Blob | File;
+      if (asset.file) {
+        blob = asset.file;
+      } else {
+        const fetched = await fetch(asset.uri);
+        blob = await fetched.blob();
+      }
+      form.append('file', blob, fileName);
+    } else {
+      form.append('file', {
+        uri: asset.uri,
+        name: fileName,
+        type: mimeType,
+      } as unknown as Blob);
+    }
+
+    const res = await fetch(`${API_BASE_URL}/api/auth/upload-avatar`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      throw { status: res.status, message: 'Avatar upload failed' } as ApiError;
+    }
+    return (await res.json()) as { avatar_url: string };
+  },
   signUp: (name: string, email: string, password: string) =>
     request<AuthUser>('/api/auth/signup', {
       method: 'POST',
@@ -96,14 +159,41 @@ async function uploadDocument(asset: {
   mimeType?: string | null;
   file?: File;
 }): Promise<{ document_id: number; chunks_stored: number; pages: number }> {
+  let fileName = asset.name || 'document.pdf';
+  const parts = fileName.split('.');
+  const ext = parts.length > 1 ? parts.pop()?.toLowerCase() : '';
+  if (!ext || !['pdf', 'docx', 'doc'].includes(ext)) {
+    if (asset.mimeType?.includes('word') || asset.mimeType?.includes('officedocument')) {
+      fileName = `${fileName}.docx`;
+    } else {
+      fileName = `${fileName}.pdf`;
+    }
+  }
+
+  const mimeType =
+    asset.mimeType ||
+    (fileName.endsWith('.docx') || fileName.endsWith('.doc')
+      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      : 'application/pdf');
+
   const form = new FormData();
-  if (Platform.OS === 'web' && asset.file) {
-    form.append('file', asset.file);
+
+  if (Platform.OS === 'web') {
+    let blob: Blob | File;
+    if (asset.file) {
+      blob = asset.file;
+    } else if (asset.uri) {
+      const fetched = await fetch(asset.uri);
+      blob = await fetched.blob();
+    } else {
+      throw { status: 400, message: 'No file selected or invalid file URI' } as ApiError;
+    }
+    form.append('file', blob, fileName);
   } else {
     form.append('file', {
       uri: asset.uri,
-      name: asset.name ?? 'document.pdf',
-      type: asset.mimeType ?? 'application/pdf',
+      name: fileName,
+      type: mimeType,
     } as unknown as Blob);
   }
   let res: Response;
@@ -193,3 +283,17 @@ export const lecturesApi = {
       body: JSON.stringify({ question }),
     }),
 };
+
+// --- Stats ------------------------------------------------------------------
+
+export interface StatsResult {
+  videos_processed: number;
+  questions_asked: number;
+  streak: number;
+  minutes_watched: number;
+}
+
+export const statsApi = {
+  get: () => request<StatsResult>('/api/stats'),
+};
+

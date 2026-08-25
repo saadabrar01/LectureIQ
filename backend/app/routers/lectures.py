@@ -1,14 +1,16 @@
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db import vector_support
 from app.db.session import get_db
-from app.models import Lecture, LectureChunk, QuizQuestion
+from app.models import Lecture, LectureChunk, QuizQuestion, TranscriptSegment
 from app.schemas import (
     LectureAskRequest,
     LectureAskResponse,
@@ -17,11 +19,19 @@ from app.schemas import (
     LectureDetailOut,
     LectureOut,
     QuizQuestionOut,
+    YouTubeImportRequest,
 )
-from app.services.embeddings import embed_query
+from app.services.embeddings import embed_query, embed_texts
 from app.services.llm import generate_answer
+from app.services.video_service import (
+    chunk_transcript_segments,
+    extract_youtube_id,
+    get_youtube_metadata,
+    get_youtube_transcript,
+)
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.get("", response_model=list[LectureOut])
@@ -72,7 +82,8 @@ TOP_K = 6
 
 
 @router.post("/{lecture_id}/ask", response_model=LectureAskResponse)
-def ask_lecture(lecture_id: str, payload: LectureAskRequest, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+def ask_lecture(request: Request, lecture_id: str, payload: LectureAskRequest, db: Session = Depends(get_db)):
     """Answer a question scoped to a lecture's transcript chunks."""
     lecture = db.get(Lecture, lecture_id)
     if lecture is None:
@@ -131,3 +142,75 @@ def ask_lecture(lecture_id: str, payload: LectureAskRequest, db: Session = Depen
 
     answer, _answer_source = generate_answer(question, contexts)
     return LectureAskResponse(answer=answer, citations=citations)
+
+
+@router.post("/youtube", response_model=LectureOut, status_code=201)
+@limiter.limit("10/hour")
+def import_youtube_lecture(request: Request, payload: YouTubeImportRequest, db: Session = Depends(get_db)):
+    """Import a YouTube video URL, fetch transcript, chunk & embed into vector DB."""
+    try:
+        video_id = extract_youtube_id(payload.url)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
+    # Check if lecture with video_id already exists
+    existing = db.scalar(select(Lecture).where(Lecture.video_id == video_id))
+    if existing:
+        return existing
+
+    # Fetch YouTube metadata
+    meta = get_youtube_metadata(video_id)
+    lecture_id = uuid4().hex[:12]
+
+    lecture = Lecture(
+        id=lecture_id,
+        title=meta["title"],
+        channel=meta["channel"],
+        video_id=video_id,
+        url=meta["url"],
+        duration=meta["duration"],
+        added_at=datetime.now(),
+        status="processing",
+        progress=10,
+        thumbnail=meta["thumbnail"],
+    )
+    db.add(lecture)
+    db.commit()
+    db.refresh(lecture)
+
+    # 1. Extract transcript segments
+    raw_segments = get_youtube_transcript(video_id)
+
+    # Store TranscriptSegments in DB
+    ts_models = [
+        TranscriptSegment(lecture_id=lecture_id, start=seg["start"], text=seg["text"])
+        for seg in raw_segments
+    ]
+    db.add_all(ts_models)
+    lecture.progress = 50
+    db.commit()
+
+    # 2. Chunk transcript with timestamps
+    chunks_data = chunk_transcript_segments(raw_segments)
+    if chunks_data:
+        chunk_texts = [c["chunk_text"] for c in chunks_data]
+        embeddings = embed_texts(chunk_texts)
+
+        chunk_models = []
+        for cdata, emb in zip(chunks_data, embeddings):
+            chunk_models.append(
+                LectureChunk(
+                    lecture_id=lecture_id,
+                    chunk_text=cdata["chunk_text"],
+                    embedding=emb,
+                    timestamp_sec=cdata["timestamp_sec"],
+                    chunk_index=cdata["chunk_index"],
+                )
+            )
+        db.add_all(chunk_models)
+
+    lecture.status = "ready"
+    lecture.progress = 100
+    db.commit()
+    db.refresh(lecture)
+    return lecture

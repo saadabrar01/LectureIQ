@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://postgres:postgres@localhost:5432/lecture_iq"
-    cors_origins: str = "*"
+    cors_origins: str = "http://localhost:8081,http://localhost:19006"
+
+    # --- Security settings --------------------------------------------------
+    jwt_secret: str = "CHANGE-ME-IN-PRODUCTION-use-openssl-rand-hex-32"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 1440  # 24 hours
 
     # --- RAG / AI settings -------------------------------------------------
     # LLM provider for answer generation: "groq" or "openai".

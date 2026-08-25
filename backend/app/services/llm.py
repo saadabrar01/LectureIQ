@@ -15,8 +15,10 @@ from app.core.config import settings
 _SYSTEM_PROMPT = (
     "You are LectureIQ's study assistant. Answer the user's question using ONLY "
     "the provided document context. Cite sources inline as [file name, page N] "
-    "where N is the page number. If the context does not contain enough "
-    "information to answer, say so explicitly - never invent facts."
+    "where N is the page number. If the question is irrelevant to the provided document "
+    "content or cannot be answered from the document, reply strictly with: "
+    "'This question is irrelevant to the uploaded document content. Please ask a question related to the document.' "
+    "Do not invent facts or answer using external knowledge outside the provided document."
 )
 
 
@@ -30,15 +32,10 @@ def _llm_endpoint() -> tuple[str, str] | None:
 
 
 def generate_answer(question: str, contexts: list[tuple[str, str]]) -> tuple[str, str]:
-    """Generate an answer for `question` given (label, text) contexts.
-
-    Returns (answer, answer_source) where answer_source is "llm" or
-    "extractive-fallback".
-    """
+    """Generate an answer for `question` given (label, text) contexts."""
     if not contexts:
         return (
-            "I could not find any relevant content in your documents. Please upload "
-            "a PDF or DOCX first, or rephrase your question.",
+            "This question is irrelevant to the uploaded document content. Please ask a question related to the document.",
             "no-context",
         )
     endpoint = _llm_endpoint()
@@ -101,7 +98,7 @@ def _extractive_answer(question: str, contexts: list[tuple[str, str]]) -> str:
     for label, text in contexts:
         for sentence in text.replace("! ", ".\n").replace("? ", ".\n").split(". "):
             sentence = sentence.strip()
-            if len(sentence) < 25:
+            if len(sentence) < 20:
                 continue
             words = set(sentence.lower().split())
             score = sum(1 for kw in keywords if kw in words)
@@ -111,8 +108,6 @@ def _extractive_answer(question: str, contexts: list[tuple[str, str]]) -> str:
     scored.sort(key=lambda item: item[0], reverse=True)
     top = scored[:4]
     if not top:
-        # No keyword overlap at all - surface the best chunk verbatim.
-        label, text = contexts[0]
-        return f"[No direct match found - closest excerpt]\n\n[{label}]\n{text[:600]}"
+        return "This question is irrelevant to the uploaded document content. Please ask a question related to the document."
     lines = [f"- {sentence} [{label}]" for _, label, sentence in top]
-    return "(Extractive fallback - set OPENAI_API_KEY for full LLM answers)\n\n" + "\n".join(lines)
+    return "\n".join(lines)
