@@ -26,6 +26,9 @@ from app.schemas import (
     AskRagRequest,
     AskRagResponse,
     DocumentOut,
+    LectureAskRequest,
+    LectureAskResponse,
+    LectureCitation,
     RagSource,
     UploadDocResponse,
 )
@@ -235,3 +238,65 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
     db.commit()
     if file_path is not None:
         file_path.unlink(missing_ok=True)
+
+
+@router.post("/documents/{document_id}/ask", response_model=AskRagResponse)
+def ask_document(document_id: int, payload: AskRagRequest, db: Session = Depends(get_db)):
+    """Answer a question scoped to a single document."""
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Question must not be empty.")
+
+    top_k = payload.top_k or settings.rag_top_k
+    query_vector = embed_query(question)
+
+    if vector_support.is_enabled():
+        stmt = (
+            select(DocumentChunk, Document, DocumentChunk.embedding.cosine_distance(query_vector))
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
+            .limit(top_k)
+        )
+        rows = db.execute(stmt).all()
+    else:
+        rows = vector_support.cosine_rank(db, query_vector, top_k, document_id)
+
+    if not rows:
+        raise HTTPException(status_code=422, detail="This document has no indexed content yet")
+
+    contexts = [(document.file_name, c.content) for c, _, _ in rows]
+
+    grouped: dict[int, dict] = {}
+    for chunk, doc, distance in rows:
+        similarity = 1.0 - float(distance)
+        entry = grouped.setdefault(
+            doc.id,
+            {"file_name": doc.file_name, "pages": [], "sims": []},
+        )
+        if chunk.page_number is not None and chunk.page_number not in entry["pages"]:
+            entry["pages"].append(chunk.page_number)
+        entry["sims"].append(similarity)
+
+    sources = sorted(
+        (
+            RagSource(
+                document_id=doc_id,
+                file_name=g["file_name"],
+                page_numbers=sorted(g["pages"]),
+                best_similarity=round(max(g["sims"]), 4),
+                avg_similarity=round(sum(g["sims"]) / len(g["sims"]), 4),
+                chunk_count=len(g["sims"]),
+            )
+            for doc_id, g in grouped.items()
+        ),
+        key=lambda s: s.best_similarity,
+        reverse=True,
+    )
+
+    answer, answer_source = generate_answer(question, contexts)
+    return AskRagResponse(question=question, answer=answer, answer_source=answer_source, sources=sources)

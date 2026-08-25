@@ -9,7 +9,7 @@ import { useAppTheme } from '../context/ThemeContext';
 import { HomeScreen } from '../screens/HomeScreen';
 import { NotesScreen } from '../screens/NotesScreen';
 import { SearchScreen } from '../screens/SearchScreen';
-import { BookmarksScreen } from '../screens/BookmarksScreen';
+import { LibraryScreen } from '../screens/LibraryScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import type { MainTabParamList } from './types';
 import { GlowBackground } from '../components/GlowBackground';
@@ -21,7 +21,7 @@ const ICONS: Record<keyof MainTabParamList, [string, string]> = {
   Home: ['home', 'home'],
   Notes: ['sticky-note-2', 'sticky-note-2'],
   Search: ['search', 'search'],
-  Bookmarks: ['bookmark', 'bookmark-border'],
+  Library: ['library-books', 'library-books'],
   Profile: ['person', 'person-outline'],
 };
 
@@ -29,7 +29,7 @@ const LABELS: Record<keyof MainTabParamList, string> = {
   Home: 'Home',
   Notes: 'Notes',
   Search: 'Search',
-  Bookmarks: 'Saved',
+  Library: 'Library',
   Profile: 'Profile',
 };
 
@@ -73,9 +73,9 @@ const WRAPPED: Record<keyof MainTabParamList, React.ComponentType<any>> = {
       <SearchScreen {...props} />
     </ScreenContainer>
   ),
-  Bookmarks: (props) => (
+  Library: (props) => (
     <ScreenContainer>
-      <BookmarksScreen {...props} />
+      <LibraryScreen {...props} />
     </ScreenContainer>
   ),
   Profile: (props) => (

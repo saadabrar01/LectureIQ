@@ -3,6 +3,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.db.session import Base, engine
@@ -35,8 +36,25 @@ async def lifespan(_: FastAPI):
     # 4. Tiny dev auto-migrations for columns added after first release.
     with engine.begin() as conn:
         conn.execute(
-            sa_text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_path VARCHAR(1024)")
+            text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_path VARCHAR(1024)")
         )
+        # Lecture chunks table for lecture-level RAG
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS lecture_chunks ("
+            "id SERIAL PRIMARY KEY, "
+            "lecture_id VARCHAR(32) NOT NULL REFERENCES lectures(id) ON DELETE CASCADE, "
+            "chunk_text TEXT NOT NULL, "
+            "embedding JSONB, "
+            "timestamp_sec INTEGER, "
+            "chunk_index INTEGER NOT NULL, "
+            "created_at TIMESTAMPTZ DEFAULT now()"
+            ")"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_lecture_chunks_lecture_id "
+            "ON lecture_chunks (lecture_id)"
+        ))
+        conn.execute(text("ALTER TABLE lectures ADD COLUMN IF NOT EXISTS duration_sec INTEGER"))
     yield
 
 

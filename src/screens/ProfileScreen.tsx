@@ -156,8 +156,8 @@ export function ProfileScreen() {
           {menuRow('settings', theme.primaryDark, 'Settings', 'Appearance, language & notifications', () =>
             navigation.navigate('Settings')
           )}
-          {menuRow('bookmark', theme.primary, 'Saved & Bookmarks', 'Your saved answers and transcript highlights', () =>
-            navigation.navigate('Bookmarks')
+          {menuRow('library-books', theme.primary, 'Library', 'Your documents and lectures', () =>
+            navigation.navigate('Library')
           )}
           {menuRow('help-outline', theme.secondary, 'Help & Support', 'FAQ, tutorials and contact', () => haptics.light())}
         </View>

@@ -198,3 +198,35 @@ class HistoryOut(ORMModel):
     document_id: int | None
     sources: list[dict] | None
     created_at: datetime
+
+
+# --- Lecture-level RAG schemas ----------------------------------------------
+
+
+class LectureAskRequest(BaseModel):
+    question: str
+
+
+class LectureCitation(BaseModel):
+    snippet: str
+    timestamp_sec: int | None = None
+    similarity: float | None = None
+
+
+class LectureAskResponse(BaseModel):
+    answer: str
+    citations: list[LectureCitation]
+
+
+class LectureOutBrief(ORMModel):
+    """Lightweight lecture info for the Library screen."""
+
+    id: str
+    title: str
+    channel: str
+    url: str
+    duration: int
+    added_at: datetime
+    status: str
+    thumbnail: str
+    duration_sec: int | None = None

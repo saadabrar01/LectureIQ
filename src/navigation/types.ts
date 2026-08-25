@@ -23,7 +23,7 @@ export type MainTabParamList = {
   Home: undefined;
   Notes: undefined;
   Search: undefined;
-  Bookmarks: undefined;
+  Library: undefined;
   Profile: undefined;
 };
 

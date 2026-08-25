@@ -20,6 +20,7 @@ class Lecture(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued")  # queued|processing|ready|error
     progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
     thumbnail: Mapped[str] = mapped_column(String(512))
+    duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     transcript: Mapped[list["TranscriptSegment"]] = relationship(
         back_populates="lecture", cascade="all, delete-orphan", order_by="TranscriptSegment.start"
@@ -33,6 +34,9 @@ class Lecture(Base):
     )
     quiz_questions: Mapped[list["QuizQuestion"]] = relationship(
         back_populates="lecture", cascade="all, delete-orphan", order_by="QuizQuestion.source_time"
+    )
+    chunks: Mapped[list["LectureChunk"]] = relationship(
+        back_populates="lecture", cascade="all, delete-orphan"
     )
 
 
@@ -186,3 +190,25 @@ class QueryHistory(Base):
     )
     sources: Mapped[list | None] = mapped_column(JSONB, default=None)  # grouped RagSource dicts
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class LectureChunk(Base):
+    """A text chunk of a lecture transcript with its vector embedding.
+
+    Mirrors DocumentChunk but scoped to a lecture's transcript segments.
+    Carries a timestamp_sec so citations can say 'From 4:12 in the video'.
+    """
+
+    __tablename__ = "lecture_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lecture_id: Mapped[str] = mapped_column(
+        ForeignKey("lectures.id", ondelete="CASCADE"), index=True
+    )
+    chunk_text: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list] = mapped_column(JSONB)
+    timestamp_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    lecture: Mapped[Lecture] = relationship(back_populates="chunks")

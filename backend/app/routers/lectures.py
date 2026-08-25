@@ -5,9 +5,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.db import vector_support
 from app.db.session import get_db
-from app.models import Lecture, QuizQuestion
-from app.schemas import LectureCreate, LectureDetailOut, LectureOut, QuizQuestionOut
+from app.models import Lecture, LectureChunk, QuizQuestion
+from app.schemas import (
+    LectureAskRequest,
+    LectureAskResponse,
+    LectureCitation,
+    LectureCreate,
+    LectureDetailOut,
+    LectureOut,
+    QuizQuestionOut,
+)
+from app.services.embeddings import embed_query
+from app.services.llm import generate_answer
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
 
@@ -54,3 +66,68 @@ def list_quiz(lecture_id: str, db: Session = Depends(get_db)):
     return db.scalars(
         select(QuizQuestion).where(QuizQuestion.lecture_id == lecture_id)
     ).all()
+
+
+TOP_K = 6
+
+
+@router.post("/{lecture_id}/ask", response_model=LectureAskResponse)
+def ask_lecture(lecture_id: str, payload: LectureAskRequest, db: Session = Depends(get_db)):
+    """Answer a question scoped to a lecture's transcript chunks."""
+    lecture = db.get(Lecture, lecture_id)
+    if lecture is None:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Question must not be empty.")
+
+    query_vector = embed_query(question)
+
+    if vector_support.is_enabled():
+        stmt = (
+            select(LectureChunk, LectureChunk.embedding.cosine_distance(query_vector))
+            .where(LectureChunk.lecture_id == lecture_id)
+            .order_by(LectureChunk.embedding.cosine_distance(query_vector))
+            .limit(TOP_K)
+        )
+        rows = db.execute(stmt).all()
+    else:
+        import math
+
+        chunks = db.scalars(
+            select(LectureChunk).where(LectureChunk.lecture_id == lecture_id)
+        ).all()
+        scored = []
+        for chunk in chunks:
+            vec = [float(x) for x in chunk.embedding]
+            dot = sum(x * y for x, y in zip(query_vector, vec))
+            na = math.sqrt(sum(x * x for x in query_vector))
+            nb = math.sqrt(sum(y * y for y in vec))
+            dist = 1.0 - dot / (na * nb) if na and nb else 1.0
+            scored.append((chunk, dist))
+        scored.sort(key=lambda r: r[1])
+        rows = scored[:TOP_K]
+
+    if not rows:
+        raise HTTPException(status_code=422, detail="This lecture has no indexed transcript yet")
+
+    contexts = []
+    citations = []
+    for item in rows:
+        if isinstance(item, tuple):
+            chunk, distance = item
+        else:
+            chunk, distance = item[0], item[1]
+        contexts.append((lecture.title, chunk.chunk_text))
+        sim = round(1.0 - float(distance), 4)
+        citations.append(
+            LectureCitation(
+                snippet=chunk.chunk_text[:200],
+                timestamp_sec=chunk.timestamp_sec,
+                similarity=sim,
+            )
+        )
+
+    answer, _answer_source = generate_answer(question, contexts)
+    return LectureAskResponse(answer=answer, citations=citations)

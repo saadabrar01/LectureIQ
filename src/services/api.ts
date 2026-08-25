@@ -158,4 +158,38 @@ export const documentsApi = {
         ...(documentId != null ? { document_id: documentId } : {}),
       }),
     }),
+  askDocument: (documentId: number, question: string) =>
+    request<AskRagResult>(`/api/documents/${documentId}/ask`, {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    }),
+};
+
+// --- Lectures / Library -----------------------------------------------------
+
+export interface LectureItem {
+  id: string;
+  title: string;
+  channel: string;
+  url: string;
+  duration: number;
+  added_at: string;
+  status: string;
+  thumbnail: string;
+  duration_sec: number | null;
+}
+
+export interface LectureAskResult {
+  answer: string;
+  citations: { snippet: string; timestamp_sec: number | null; similarity: number | null }[];
+}
+
+export const lecturesApi = {
+  list: () => request<LectureItem[]>('/api/lectures'),
+  remove: (id: string) => request<void>(`/api/lectures/${id}`, { method: 'DELETE' }),
+  askLecture: (lectureId: string, question: string) =>
+    request<LectureAskResult>(`/api/lectures/${lectureId}/ask`, {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    }),
 };
