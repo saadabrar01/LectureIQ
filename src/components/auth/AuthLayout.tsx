@@ -10,7 +10,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { onboardingPalette } from '../../theme/onboarding';
+import { onboardingPalette, accent, authTokens } from '../../theme/onboarding';
 import { typography } from '../../theme/typography';
 
 /**
@@ -36,14 +36,14 @@ export function AuthLayout({ children }: AuthLayoutProps) {
       end={{ x: 0, y: 1 }}
       style={styles.root}
     >
-      {/* Soft ambient glows behind the card (subtle green + lavender) */}
+      {/* Soft ambient glows behind the card (subtle emerald + lavender) */}
       <View style={styles.ambient}>
         <LinearGradient
-          colors={['rgba(34,197,94,0.12)', 'rgba(34,197,94,0)']}
+          colors={['rgba(52,211,153,0.14)', 'rgba(52,211,153,0)']}
           style={[styles.ambientGlow, styles.ambientMint]}
         />
         <LinearGradient
-          colors={['rgba(159,143,240,0.08)', 'rgba(159,143,240,0)']}
+          colors={['rgba(159,143,240,0.1)', 'rgba(159,143,240,0)']}
           style={[styles.ambientGlow, styles.ambientLavender]}
         />
       </View>
@@ -62,16 +62,18 @@ export function AuthLayout({ children }: AuthLayoutProps) {
         >
           {/* Centered card — the single focal container for auth content */}
           <View style={styles.cardWrap}>
+            <View style={styles.cardGlow} />
             <View style={styles.card}>
               {/* Brand header: small gradient logo tile + wordmark */}
               <View style={styles.brandRow}>
+                <View style={styles.logoHalo} />
                 <LinearGradient
-                  colors={[onboardingPalette.primary, onboardingPalette.secondary]}
+                  colors={[accent.emerald, accent.tealDeep]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.logoTile}
                 >
-                  <MaterialIcons name="auto-awesome" size={16} color={onboardingPalette.accentDeep} />
+                  <MaterialIcons name="auto-awesome" size={16} color={accent.onGradient} />
                 </LinearGradient>
                 <Text style={styles.logoName}>LectureIQ</Text>
               </View>
@@ -100,20 +102,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 20,
   },
+  // Soft emerald glow floating behind the card so it reads as elevated
+  cardGlow: {
+    position: 'absolute',
+    width: 480,
+    height: 480,
+    borderRadius: 240,
+    backgroundColor: accent.glow,
+    opacity: 0.6,
+    shadowColor: accent.emerald,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 60,
+  },
   // The glass card: max-w-xl (560px) so forms never stretch across the screen
   card: {
     width: '100%',
     maxWidth: 560,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: onboardingPalette.borderStrong,
-    backgroundColor: onboardingPalette.cardStrong,
+    borderColor: authTokens.cardBorder,
+    backgroundColor: 'rgba(14,23,18,0.72)',
     padding: 28,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 24 },
-    shadowOpacity: 0.45,
-    shadowRadius: 40,
+    shadowOpacity: 0.5,
+    shadowRadius: 44,
     elevation: 14,
+    overflow: 'hidden',
   },
   brandRow: {
     flexDirection: 'row',
@@ -122,13 +138,24 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 26,
   },
+  logoHalo: {
+    position: 'absolute',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: accent.glow,
+    shadowColor: accent.emerald,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.7,
+    shadowRadius: 12,
+  },
   logoTile: {
     width: 34,
     height: 34,
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: onboardingPalette.secondary,
+    shadowColor: accent.tealDeep,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.4,
     shadowRadius: 12,

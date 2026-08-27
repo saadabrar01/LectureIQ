@@ -80,18 +80,23 @@ app = FastAPI(title="LectureIQ API", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# --- Global request size limit (100 MB max body) ---------------------------
-MAX_BODY_BYTES = 100 * 1024 * 1024
+# --- Global request size limits ---------------------------------------------
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB for videos & large documents
+MAX_JSON_BYTES = 20 * 1024 * 1024      # 20 MB for JSON / regular requests
 
 
 @app.middleware("http")
 async def limit_request_size(request: Request, call_next):
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > MAX_BODY_BYTES:
-        return JSONResponse(
-            status_code=413,
-            content={"detail": "Request body too large."},
-        )
+    if content_length:
+        size = int(content_length)
+        is_upload = any(request.url.path.startswith(p) for p in ["/api/lectures/upload-video", "/api/upload-doc", "/api/auth/upload-avatar"])
+        limit = MAX_UPLOAD_BYTES if is_upload else MAX_JSON_BYTES
+        if size > limit:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": f"Request body too large. Maximum allowed size is {limit // (1024 * 1024)} MB."},
+            )
     return await call_next(request)
 
 

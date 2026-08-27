@@ -11,7 +11,7 @@ export type RootStackParamList = {
   LectureDetail: { lectureId: string };
   Chat: { lectureId: string };
   Voice: { lectureId?: string };
-  AddNote: { noteId?: string };
+  AddNote: { noteId?: string; lectureId?: string; initialTitle?: string; initialContent?: string } | undefined;
   Summary: { lectureId: string };
   Quiz: { lectureId: string; count?: number };
   QuizConfig: { lectureId: string };

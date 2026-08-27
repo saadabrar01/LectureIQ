@@ -1,7 +1,8 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# dependencies
+# Dependencies
 node_modules/
+package-lock.json.bak
 
 # Expo
 .expo/
@@ -9,7 +10,7 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Native
+# Native builds
 .kotlin/
 *.orig.*
 *.jks
@@ -17,39 +18,52 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+/ios
+/android
 
 # Metro
 .metro-health-check*
 
-# debug
+# Debug & logs
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*.log
 
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
-
-# IDE
-.vscode/
-pyrightconfig.json
-
-# backend (FastAPI)
+# Environment variables & secrets (CRITICAL)
+.env
+.env.*
+!.env.example
 backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Python & Backend
 backend/.venv/
-backend/uploads/
+backend/venv/
+venv/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+backend/uploads/
+backend/temp/
+*.db
+*.sqlite
+*.sqlite3
 
-# local build checks
-/dist-check-web/
+# OS files
+.DS_Store
+Thumbs.db
+*.pem
 
-# typescript
+# IDEs
+.vscode/
+.idea/
+pyrightconfig.json
 *.tsbuildinfo
 
-# generated native folders
-/ios
-/android
+# Build artifacts
+/dist-check-web/

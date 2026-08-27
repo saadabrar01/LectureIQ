@@ -136,6 +136,15 @@ class NoteCreate(BaseModel):
             raise ValueError("Color must be a valid hex color (e.g. #8EF0A3).")
         return v
 
+    @field_validator("lecture_id")
+    @classmethod
+    def validate_lecture_id(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if not v:
+                return None
+        return v
+
 
 class NoteUpdate(BaseModel):
     title: str | None = None
@@ -166,6 +175,15 @@ class NoteUpdate(BaseModel):
     def validate_color(cls, v: str | None) -> str | None:
         if v is not None and not re.match(r"^#[0-9A-Fa-f]{6}$", v):
             raise ValueError("Color must be a valid hex color (e.g. #8EF0A3).")
+        return v
+
+    @field_validator("lecture_id")
+    @classmethod
+    def validate_lecture_id(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if not v:
+                return None
         return v
 
 
@@ -462,3 +480,9 @@ class LectureOutBrief(ORMModel):
     status: str
     thumbnail: str
     duration_sec: int | None = None
+
+
+class VideoUploadResponse(LectureOut):
+    """Response after successfully uploading and transcribing a local video/audio file."""
+    transcript_segments: int = 0
+    chunks_stored: int = 0

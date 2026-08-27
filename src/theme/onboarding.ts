@@ -32,15 +32,28 @@ export const onboardingMetrics = {
   radiusPill: 999,
 };
 
+// Unified emerald→teal accent family — matches the Home / Profile / Notes redesigns.
+export const accent = {
+  emerald: '#34D399',
+  teal: '#2DD4BF',
+  tealDeep: '#0EA5A0',
+  mint: '#8EF0A3',
+  ring: 'rgba(52,211,153,0.55)',
+  glow: 'rgba(52,211,153,0.25)',
+  onGradient: '#06281A',
+  gradient: ['#34D399', '#0EA5A0'] as const,
+} as const;
+
 export const authTokens = {
   inputBg: 'rgba(255,255,255,0.03)',
-  inputFocusBg: 'rgba(255,255,255,0.05)',
-  inputBorder: 'rgba(255,255,255,0.08)',
-  inputBorderHover: 'rgba(142,240,163,0.35)',
-  focusGlow: 'rgba(142,240,163,0.16)',
+  inputFocusBg: 'rgba(255,255,255,0.06)',
+  inputBorder: 'rgba(255,255,255,0.1)',
+  inputBorderHover: accent.ring,
+  focusGlow: accent.glow,
   label: 'rgba(245,247,246,0.75)',
   placeholder: 'rgba(141,155,146,0.65)',
   divider: 'rgba(255,255,255,0.08)',
+  cardBorder: 'rgba(255,255,255,0.14)',
 };
 
 export const space = {

@@ -21,6 +21,12 @@ def list_notes(db: Session = Depends(get_db)):
 def create_note(payload: NoteCreate, db: Session = Depends(get_db)):
     data = payload.model_dump()
     data["id"] = data["id"] or uuid4().hex[:12]
+    # Verify lecture_id exists in database to avoid foreign key failure
+    if data.get("lecture_id"):
+        from app.models import Lecture
+        exists = db.get(Lecture, data["lecture_id"])
+        if not exists:
+            data["lecture_id"] = None
     note = Note(**data, updated_at=datetime.now())
     db.add(note)
     db.commit()
@@ -33,7 +39,13 @@ def update_note(note_id: str, payload: NoteUpdate, db: Session = Depends(get_db)
     note = db.get(Note, note_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "lecture_id" in data and data["lecture_id"]:
+        from app.models import Lecture
+        exists = db.get(Lecture, data["lecture_id"])
+        if not exists:
+            data["lecture_id"] = None
+    for field, value in data.items():
         setattr(note, field, value)
     note.updated_at = datetime.now()
     db.commit()

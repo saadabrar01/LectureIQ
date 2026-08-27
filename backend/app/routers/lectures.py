@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from app.schemas import (
     LectureDetailOut,
     LectureOut,
     QuizQuestionOut,
+    VideoUploadResponse,
     YouTubeImportRequest,
 )
 from app.services.embeddings import embed_query, embed_texts
@@ -28,6 +29,7 @@ from app.services.video_service import (
     extract_youtube_id,
     get_youtube_metadata,
     get_youtube_transcript,
+    transcribe_audio_file,
 )
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
@@ -214,3 +216,141 @@ def import_youtube_lecture(request: Request, payload: YouTubeImportRequest, db: 
     db.commit()
     db.refresh(lecture)
     return lecture
+
+
+# ---------------------------------------------------------------------------
+# LOCAL VIDEO / AUDIO UPLOAD  (Whisper transcription)
+# ---------------------------------------------------------------------------
+
+@router.post("/upload-video", response_model=VideoUploadResponse, status_code=201)
+@limiter.limit("5/hour")
+def upload_video_lecture(
+    request: Request,
+    file: UploadFile = File(...),
+    title: str = "",
+    db: Session = Depends(get_db),
+):
+    """Accept a local video/audio file, transcribe it via Whisper, chunk & embed."""
+    import os
+    import tempfile
+
+    ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".m4a", ".wav", ".ogg"}
+    ALLOWED_MIME_PREFIXES = ["video/", "audio/"]
+    MAX_FILE_SIZE = 1024 * 1024 * 1024  # 1 GB (1024 MB)
+
+    # Validate filename
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+
+    # Check content-type header (optional but good practice)
+    ct = (file.content_type or "").lower()
+    if ct and not any(ct.startswith(p) for p in ALLOWED_MIME_PREFIXES):
+        raise HTTPException(status_code=422, detail=f"Invalid content type: {ct}")
+
+    # Save uploaded file to temp location
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp_path = tmp.name
+            content = file.file.read(MAX_FILE_SIZE + 1)
+            if len(content) > MAX_FILE_SIZE:
+                os.unlink(tmp_path)
+                raise HTTPException(status_code=413, detail="File is too large. Maximum size is 500 MB.")
+            tmp.write(content)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save uploaded file: {exc}") from exc
+
+    # Build lecture record immediately (status=processing)
+    lecture_id = uuid4().hex[:12]
+    file_title = title.strip() or (os.path.splitext(file.filename or "Uploaded Lecture")[0])
+    video_id = f"local_{lecture_id}"  # synthetic video_id for local files
+
+    lecture = Lecture(
+        id=lecture_id,
+        title=file_title[:255],
+        channel="Local Upload",
+        video_id=video_id,
+        url="",  # no URL for local files
+        duration=0,
+        added_at=datetime.now(),
+        status="processing",
+        progress=10,
+        thumbnail="",
+    )
+    db.add(lecture)
+    db.commit()
+    db.refresh(lecture)
+
+    try:
+        # 1. Transcribe via ffmpeg + Whisper
+        lecture.progress = 20
+        db.commit()
+
+        raw_segments = transcribe_audio_file(tmp_path)
+
+        # 2. Store transcript segments
+        ts_models = [
+            TranscriptSegment(lecture_id=lecture_id, start=seg["start"], text=seg["text"])
+            for seg in raw_segments
+        ]
+        db.add_all(ts_models)
+        lecture.progress = 60
+        db.commit()
+
+        # 3. Chunk + embed
+        chunks_data = chunk_transcript_segments(raw_segments)
+        chunks_stored = 0
+        if chunks_data:
+            chunk_texts = [c["chunk_text"] for c in chunks_data]
+            embeddings = embed_texts(chunk_texts)
+
+            chunk_models = [
+                LectureChunk(
+                    lecture_id=lecture_id,
+                    chunk_text=cdata["chunk_text"],
+                    embedding=emb,
+                    timestamp_sec=cdata["timestamp_sec"],
+                    chunk_index=cdata["chunk_index"],
+                )
+                for cdata, emb in zip(chunks_data, embeddings)
+            ]
+            db.add_all(chunk_models)
+            chunks_stored = len(chunk_models)
+
+        lecture.status = "ready"
+        lecture.progress = 100
+        db.commit()
+        db.refresh(lecture)
+
+        # Return extended response
+        resp_data = VideoUploadResponse(
+            id=lecture.id,
+            title=lecture.title,
+            channel=lecture.channel,
+            video_id=lecture.video_id,
+            url=lecture.url,
+            duration=lecture.duration,
+            added_at=lecture.added_at,
+            status=lecture.status,
+            progress=lecture.progress,
+            thumbnail=lecture.thumbnail,
+            transcript_segments=len(raw_segments),
+            chunks_stored=chunks_stored,
+        )
+        return resp_data
+
+    except Exception as exc:
+        lecture.status = "error"
+        lecture.progress = 0
+        db.commit()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass

@@ -6,7 +6,7 @@ import {
   Text,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { onboardingPalette, radius } from '../../theme/onboarding';
+import { accent, radius } from '../../theme/onboarding';
 import { typography } from '../../theme/typography';
 
 interface AuthButtonProps {
@@ -32,21 +32,29 @@ export function AuthButton({
     <Pressable
       onPress={onPress}
       disabled={inactive}
-      style={({ pressed }) => [
-        styles.wrap,
-        pressed && !inactive && { transform: [{ scale: 0.975 }] },
-        inactive && styles.disabled,
-      ]}
+      style={(state) => {
+        const hovered = (state as { hovered?: boolean }).hovered ?? false;
+        return [
+          styles.wrap,
+          inactive && styles.disabled,
+          state.pressed && !inactive && { transform: [{ scale: 0.975 }] },
+          hovered && !inactive && {
+            transform: [{ translateY: -2 }],
+            shadowOpacity: 0.5,
+            shadowRadius: 22,
+          },
+        ];
+      }}
     >
       <LinearGradient
-        colors={[onboardingPalette.primary, onboardingPalette.secondary]}
+        colors={[accent.emerald, accent.tealDeep]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.gradient}
       >
         {loading ? (
           <>
-            <ActivityIndicator size="small" color={onboardingPalette.accentDeep} />
+            <ActivityIndicator size="small" color={accent.onGradient} />
             <Text style={styles.label}>{loadingLabel}</Text>
           </>
         ) : (
@@ -64,9 +72,9 @@ const styles = StyleSheet.create({
   wrap: {
     height: 52,
     borderRadius: radius.md,
-    shadowColor: onboardingPalette.primary,
+    shadowColor: accent.emerald,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.28,
+    shadowOpacity: 0.35,
     shadowRadius: 16,
     elevation: 10,
   },
@@ -80,7 +88,7 @@ const styles = StyleSheet.create({
   },
   label: {
     ...typography.button,
-    color: onboardingPalette.accentDeep,
+    color: accent.onGradient,
   },
   disabled: { opacity: 0.45 },
 });

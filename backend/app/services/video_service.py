@@ -3,14 +3,22 @@
 Provides:
 1. YouTube URL parsing and metadata retrieval.
 2. YouTube transcript fetching (with timestamp support).
-3. Audio/Video transcription processing (Whisper).
+3. Local Audio/Video file transcription via Groq Whisper (with OpenAI fallback).
 4. Chunking of transcript segments with associated timestamps for pgvector indexing.
 """
 
 import json
+import logging
+import os
 import re
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 import httpx
+
+logger = logging.getLogger("lectureiq.video")
 
 
 def extract_youtube_id(url_or_id: str) -> str:
@@ -49,6 +57,28 @@ def get_youtube_metadata(video_id: str) -> Dict[str, Any]:
                 thumbnail = data.get("thumbnail_url", thumbnail)
     except Exception:
         pass  # Fallback to defaults
+
+    # Try yt-dlp for richer metadata (duration, etc.)
+    try:
+        cmd = [
+            "yt-dlp",
+            "--skip-download",
+            "--print", "%(title)s\n%(uploader)s\n%(duration)s\n%(thumbnail)s",
+            f"https://www.youtube.com/watch?v={video_id}"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if res.returncode == 0 and res.stdout:
+            lines = res.stdout.strip().splitlines()
+            if len(lines) >= 1 and lines[0]:
+                title = lines[0].strip()
+            if len(lines) >= 2 and lines[1]:
+                channel = lines[1].strip()
+            if len(lines) >= 3 and lines[2].isdigit():
+                duration = int(lines[2])
+            if len(lines) >= 4 and lines[3]:
+                thumbnail = lines[3].strip()
+    except Exception as e:
+        logger.debug("yt-dlp metadata fallback failed: %s", e)
 
     return {
         "video_id": video_id,
@@ -177,3 +207,129 @@ def chunk_transcript_segments(
         })
 
     return chunks
+
+
+def transcribe_audio_file(file_path: str) -> List[Dict[str, Any]]:
+    """Transcribe a local audio/video file using Groq Whisper API.
+
+    Workflow:
+    1. Use ffmpeg to extract/convert audio to 16kHz mono WAV (avoids large upload).
+    2. Send to Groq Whisper API (whisper-large-v3-turbo) for transcription with timestamps.
+    3. Fall back to OpenAI Whisper API if Groq key not set.
+    4. Returns list of {start: int, text: str} segments.
+    """
+    segments: List[Dict[str, Any]] = []
+
+    # Step 1: Convert to compressed audio (16kHz mono mp3 — small but Whisper-friendly)
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        audio_path = tmp.name
+
+    try:
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-i", file_path,
+            "-vn",                         # strip video stream
+            "-ar", "16000",               # 16kHz sample rate
+            "-ac", "1",                   # mono
+            "-b:a", "64k",               # 64 kbps — good quality, small file
+            audio_path,
+        ]
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, timeout=300)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {result.stderr.decode()[:500]}")
+
+        audio_size = Path(audio_path).stat().st_size
+        logger.info("Audio extracted: %s bytes -> %s", os.path.getsize(file_path), audio_size)
+
+        # Step 2: Transcribe via Groq or OpenAI Whisper
+        groq_api_key = settings.groq_api_key or os.getenv("GROQ_API_KEY", "")
+        openai_api_key = getattr(settings, "openai_api_key", "") or os.getenv("OPENAI_API_KEY", "")
+
+        if groq_api_key:
+            segments = _transcribe_groq(audio_path, groq_api_key)
+        elif openai_api_key:
+            segments = _transcribe_openai(audio_path, openai_api_key)
+        else:
+            raise RuntimeError(
+                "No transcription API key found. Set GROQ_API_KEY or OPENAI_API_KEY in your .env file."
+            )
+    finally:
+        try:
+            os.unlink(audio_path)
+        except OSError:
+            pass
+
+    # Ensure we always return something
+    if not segments:
+        segments.append({"start": 0, "text": "Transcription produced no text segments."})
+
+    return segments
+
+
+def _transcribe_groq(audio_path: str, api_key: str) -> List[Dict[str, Any]]:
+    """Call Groq Whisper API and return timestamped segments."""
+    segments: List[Dict[str, Any]] = []
+    try:
+        with open(audio_path, "rb") as audio_file:
+            with httpx.Client(timeout=120.0) as client:
+                resp = client.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={"file": (Path(audio_path).name, audio_file, "audio/mpeg")},
+                    data={
+                        "model": "whisper-large-v3-turbo",
+                        "response_format": "verbose_json",
+                        "timestamp_granularities": "segment",
+                    },
+                )
+        resp.raise_for_status()
+        data = resp.json()
+        for seg in data.get("segments", []):
+            text = seg.get("text", "").strip()
+            if text:
+                segments.append({
+                    "start": int(seg.get("start", 0)),
+                    "text": text,
+                })
+        # Fallback: if no segments but has text, create single segment
+        if not segments and data.get("text"):
+            segments.append({"start": 0, "text": data["text"].strip()})
+        logger.info("Groq Whisper produced %d segments", len(segments))
+    except Exception as e:
+        logger.error("Groq transcription failed: %s", e)
+        raise
+    return segments
+
+
+def _transcribe_openai(audio_path: str, api_key: str) -> List[Dict[str, Any]]:
+    """Call OpenAI Whisper API and return timestamped segments."""
+    segments: List[Dict[str, Any]] = []
+    try:
+        with open(audio_path, "rb") as audio_file:
+            with httpx.Client(timeout=120.0) as client:
+                resp = client.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={"file": (Path(audio_path).name, audio_file, "audio/mpeg")},
+                    data={
+                        "model": "whisper-1",
+                        "response_format": "verbose_json",
+                        "timestamp_granularities": "segment",
+                    },
+                )
+        resp.raise_for_status()
+        data = resp.json()
+        for seg in data.get("segments", []):
+            text = seg.get("text", "").strip()
+            if text:
+                segments.append({
+                    "start": int(seg.get("start", 0)),
+                    "text": text,
+                })
+        if not segments and data.get("text"):
+            segments.append({"start": 0, "text": data["text"].strip()})
+        logger.info("OpenAI Whisper produced %d segments", len(segments))
+    except Exception as e:
+        logger.error("OpenAI transcription failed: %s", e)
+        raise
+    return segments

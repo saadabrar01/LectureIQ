@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { onboardingPalette } from '../../theme/onboarding';
+import { accent } from '../../theme/onboarding';
 import { typography } from '../../theme/typography';
 
 interface ForgotPasswordLinkProps {
@@ -12,7 +12,14 @@ export function ForgotPasswordLink({ onPress }: ForgotPasswordLinkProps) {
     <Pressable
       onPress={onPress}
       hitSlop={8}
-      style={({ pressed }) => [styles.link, pressed && { opacity: 0.65 }]}
+      style={(state) => {
+        const hovered = (state as { hovered?: boolean }).hovered ?? false;
+        return [
+          styles.link,
+          state.pressed && { opacity: 0.65 },
+          hovered && { borderBottomColor: accent.emerald },
+        ];
+      }}
     >
       <Text style={styles.text}>Forgot password?</Text>
     </Pressable>
@@ -24,10 +31,12 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     paddingVertical: 4,
     paddingHorizontal: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'transparent',
   },
   text: {
     ...typography.bodySmall,
     fontFamily: 'Inter_500Medium',
-    color: 'rgba(142,240,163,0.85)',
+    color: accent.emerald,
   },
 });

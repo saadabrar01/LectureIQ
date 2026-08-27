@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { onboardingPalette } from '../../theme/onboarding';
+import { onboardingPalette, accent } from '../../theme/onboarding';
 import { typography } from '../../theme/typography';
 
 interface AuthRedirectProps {
@@ -13,7 +13,14 @@ export function AuthRedirect({ prompt, link, onPress }: AuthRedirectProps) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
+      style={(state) => {
+        const hovered = (state as { hovered?: boolean }).hovered ?? false;
+        return [
+          styles.row,
+          state.pressed && { opacity: 0.7 },
+          hovered && { borderBottomColor: accent.emerald },
+        ];
+      }}
       hitSlop={8}
     >
       <Text style={styles.prompt}>{prompt} </Text>
@@ -29,7 +36,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignSelf: 'center',
     paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: 'transparent',
   },
   prompt: {
     ...typography.body,
@@ -37,6 +46,6 @@ const styles = StyleSheet.create({
   },
   link: {
     ...typography.bodySemi,
-    color: onboardingPalette.primary,
+    color: accent.emerald,
   },
 });

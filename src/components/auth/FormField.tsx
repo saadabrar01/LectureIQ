@@ -14,7 +14,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { onboardingPalette, authTokens, radius, space } from '../../theme/onboarding';
+import { onboardingPalette, accent, authTokens, radius, space } from '../../theme/onboarding';
 import { typography } from '../../theme/typography';
 import { haptics } from '../../utils/helpers';
 
@@ -47,7 +47,8 @@ export function FormField({
       [0, 1],
       [authTokens.inputBg, authTokens.inputFocusBg]
     ),
-    shadowOpacity: interpolateColor(focus.value, [0, 1], [0, 0.35]),
+    shadowOpacity: interpolateColor(focus.value, [0, 1], [0, 0.4]),
+    shadowRadius: interpolateColor(focus.value, [0, 1], [0, 16]),
   }));
 
   return (
@@ -56,14 +57,14 @@ export function FormField({
       <Animated.View
         style={[
           styles.inputRow,
-          { shadowColor: onboardingPalette.primary },
+          { shadowColor: accent.emerald },
           animatedStyle,
         ]}
       >
         {icon}
         <TextInput
           placeholderTextColor={authTokens.placeholder}
-          selectionColor={onboardingPalette.primary}
+          selectionColor={accent.emerald}
           style={styles.input}
           onFocus={(e) => {
             focus.value = withTiming(1, { duration: 220 });

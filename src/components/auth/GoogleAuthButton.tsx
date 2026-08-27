@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { onboardingPalette, authTokens, radius } from '../../theme/onboarding';
+import { onboardingPalette, accent, authTokens, radius } from '../../theme/onboarding';
 import { typography } from '../../theme/typography';
 
 interface GoogleAuthButtonProps {
@@ -12,18 +12,30 @@ export function GoogleAuthButton({ onPress }: GoogleAuthButtonProps) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.row,
-        {
-          backgroundColor: authTokens.inputBg,
-          borderColor: authTokens.inputBorder,
-        },
-        pressed && {
-          borderColor: authTokens.inputBorderHover,
-          backgroundColor: authTokens.inputFocusBg,
-          transform: [{ scale: 0.985 }],
-        },
-      ]}
+      style={(state) => {
+        const hovered = (state as { hovered?: boolean }).hovered ?? false;
+        return [
+          styles.row,
+          {
+            backgroundColor: authTokens.inputBg,
+            borderColor: authTokens.inputBorder,
+          },
+          state.pressed && {
+            borderColor: accent.ring,
+            backgroundColor: authTokens.inputFocusBg,
+            transform: [{ scale: 0.985 }],
+          },
+          hovered && {
+            borderColor: accent.ring,
+            backgroundColor: 'rgba(52,211,153,0.08)',
+            shadowColor: accent.emerald,
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.25,
+            shadowRadius: 14,
+            elevation: 6,
+          },
+        ];
+      }}
     >
       <MaterialCommunityIcons name="google" size={20} color={onboardingPalette.text} />
       <Text style={styles.label}>Continue with Google</Text>
@@ -40,6 +52,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
   },
   label: {
     ...typography.bodySemi,

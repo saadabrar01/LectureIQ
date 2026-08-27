@@ -274,13 +274,130 @@ export interface LectureAskResult {
   citations: { snippet: string; timestamp_sec: number | null; similarity: number | null }[];
 }
 
+export interface TranscriptSegmentItem {
+  start: number;
+  text: string;
+}
+
+export interface LectureDetailItem extends LectureItem {
+  video_id: string;
+  transcript: TranscriptSegmentItem[];
+}
+
+export interface VideoUploadResult extends LectureItem {
+  transcript_segments: number;
+  chunks_stored: number;
+}
+
 export const lecturesApi = {
   list: () => request<LectureItem[]>('/api/lectures'),
+  get: (id: string) => request<LectureDetailItem>(`/api/lectures/${id}`),
   remove: (id: string) => request<void>(`/api/lectures/${id}`, { method: 'DELETE' }),
+  importYouTube: (url: string) =>
+    request<LectureItem>('/api/lectures/youtube', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
   askLecture: (lectureId: string, question: string) =>
     request<LectureAskResult>(`/api/lectures/${lectureId}/ask`, {
       method: 'POST',
       body: JSON.stringify({ question }),
+    }),
+  uploadVideo: async (asset: {
+    uri: string;
+    name?: string;
+    mimeType?: string | null;
+    file?: File;
+  }, title?: string): Promise<VideoUploadResult> => {
+    const form = new FormData();
+    const fileName = asset.name || 'lecture.mp4';
+    const mimeType = asset.mimeType || 'video/mp4';
+
+    if (Platform.OS === 'web') {
+      let blob: Blob | File;
+      if (asset.file) {
+        blob = asset.file;
+      } else {
+        const fetched = await fetch(asset.uri);
+        blob = await fetched.blob();
+      }
+      form.append('file', blob, fileName);
+    } else {
+      form.append('file', {
+        uri: asset.uri,
+        name: fileName,
+        type: mimeType,
+      } as unknown as Blob);
+    }
+
+    if (title) form.append('title', title);
+
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE_URL}/api/lectures/upload-video`, {
+        method: 'POST',
+        body: form,
+      });
+    } catch {
+      throw {
+        status: 0,
+        message: 'Cannot reach the server. Make sure the FastAPI backend is running.',
+      } as ApiError;
+    }
+    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+    if (!res.ok) {
+      const detail = body?.detail;
+      throw {
+        status: res.status,
+        message: typeof detail === 'string' ? detail : 'Video upload failed. Please try again.',
+      } as ApiError;
+    }
+    return body as VideoUploadResult;
+  },
+};
+
+// --- Notes ------------------------------------------------------------------
+
+export interface NoteItem {
+  id: string;
+  title: string;
+  content: string;
+  lecture_id?: string | null;
+  lecture_title?: string | null;
+  color: string;
+  updated_at: string;
+}
+
+export interface NoteCreatePayload {
+  id?: string;
+  title: string;
+  content: string;
+  lecture_id?: string | null;
+  color?: string;
+}
+
+export interface NoteUpdatePayload {
+  title?: string;
+  content?: string;
+  lecture_id?: string | null;
+  color?: string;
+}
+
+export const notesApi = {
+  list: () => request<NoteItem[]>('/api/notes'),
+  create: (data: NoteCreatePayload) =>
+    request<NoteItem>('/api/notes', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: NoteUpdatePayload) =>
+    request<NoteItem>(`/api/notes/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  remove: (id: string) =>
+    request<void>(`/api/notes/${id}`, {
+      method: 'DELETE',
     }),
 };
 
@@ -296,4 +413,5 @@ export interface StatsResult {
 export const statsApi = {
   get: () => request<StatsResult>('/api/stats'),
 };
+
 

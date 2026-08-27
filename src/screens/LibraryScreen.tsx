@@ -16,7 +16,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../context/ThemeContext';
 import { typography } from '../theme/typography';
-import { Header } from '../components/Header';
 import { SourceCard, type SourceType } from '../components/SourceCard';
 import { documentsApi, lecturesApi, type ApiError } from '../services/api';
 import { haptics } from '../utils/helpers';
@@ -34,10 +33,15 @@ interface LibraryItem {
   fileType?: string;
 }
 
-const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
-  { key: 'all', label: 'All', icon: 'apps' },
-  { key: 'document', label: 'Documents', icon: 'description' },
-  { key: 'video', label: 'Lectures', icon: 'smart-display' },
+const MINT = '#34D399';
+const CYAN = '#38BDF8';
+const FOREST_CARD_BG = '#071A12';
+const FOREST_BORDER = 'rgba(52, 211, 153, 0.35)';
+
+const FILTERS: { key: FilterKey; label: string; icon: string; activeColor: string }[] = [
+  { key: 'all', label: 'All', icon: 'apps', activeColor: MINT },
+  { key: 'document', label: 'Documents', icon: 'description', activeColor: MINT },
+  { key: 'video', label: 'Lectures', icon: 'smart-display', activeColor: CYAN },
 ];
 
 function formatBytes(bytes: number): string {
@@ -66,15 +70,12 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-const MINT = '#22C55E';
-
 export function LibraryScreen() {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { width } = useWindowDimensions();
 
-  // 3 cards per row on wide screens, 2 on medium, 1 on small mobile
   const numColumns = width > 768 ? 3 : width > 480 ? 2 : 1;
 
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -107,7 +108,7 @@ export function LibraryScreen() {
         name: l.title,
         date: formatDate(l.added_at),
         sizeLabel: formatDuration(l.duration_sec ?? l.duration),
-        badge: 'YouTube',
+        badge: l.channel === 'Local Upload' ? 'Local' : 'YouTube',
       }));
 
       setItems(
@@ -178,7 +179,7 @@ export function LibraryScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color={MINT} />
+        <ActivityIndicator color={MINT} size="large" />
       </View>
     );
   }
@@ -201,12 +202,12 @@ export function LibraryScreen() {
 
       {/* In-Place Search Bar */}
       <View style={styles.searchWrap}>
-        <MaterialIcons name="search" size={20} color="rgba(255,255,255,0.4)" />
+        <MaterialIcons name="search" size={20} color={MINT} />
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Search documents or lectures..."
-          placeholderTextColor="rgba(255,255,255,0.38)"
+          placeholderTextColor="rgba(255,255,255,0.45)"
           style={[styles.searchInput, { color: theme.textPrimary }]}
         />
         {searchQuery ? (
@@ -223,37 +224,45 @@ export function LibraryScreen() {
         ) : null}
       </View>
 
+      {/* Filter Row */}
       <View style={styles.filterRow}>
-        {FILTERS.map((f) => (
-          <Pressable
-            key={f.key}
-            onPress={() => {
-              haptics.light();
-              setFilter(f.key);
-            }}
-            style={({ pressed }) => [
-              styles.chip,
-              filter === f.key && styles.chipActive,
-              pressed && { transform: [{ scale: 0.96 }] },
-            ]}
-          >
-            <MaterialIcons
-              name={f.icon as never}
-              size={14}
-              color={filter === f.key ? '#06281A' : theme.textSecondary}
-            />
-            <Text
-              style={[
-                styles.chipText,
-                { color: filter === f.key ? '#06281A' : theme.textSecondary },
+        {FILTERS.map((f) => {
+          const isActive = filter === f.key;
+          return (
+            <Pressable
+              key={f.key}
+              onPress={() => {
+                haptics.light();
+                setFilter(f.key);
+              }}
+              style={({ pressed }) => [
+                styles.chip,
+                isActive && {
+                  backgroundColor: f.activeColor,
+                  borderColor: f.activeColor,
+                },
+                pressed && { transform: [{ scale: 0.96 }] },
               ]}
             >
-              {f.label}
-            </Text>
-          </Pressable>
-        ))}
+              <MaterialIcons
+                name={f.icon as never}
+                size={15}
+                color={isActive ? '#06281A' : theme.textSecondary}
+              />
+              <Text
+                style={[
+                  styles.chipText,
+                  { color: isActive ? '#06281A' : theme.textSecondary },
+                ]}
+              >
+                {f.label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
+      {/* Sources Grid */}
       <FlatList
         key={numColumns}
         numColumns={numColumns}
@@ -282,11 +291,11 @@ export function LibraryScreen() {
         )}
         ListEmptyComponent={
           <View style={styles.emptyCard}>
-            <MaterialIcons name="folder-open" size={36} color="rgba(255,255,255,0.18)" />
-            <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
+            <MaterialIcons name="folder-open" size={38} color="rgba(52,211,153,0.35)" />
+            <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>
               {searchQuery ? 'No matching sources found' : 'No sources yet'}
             </Text>
-            <Text style={[styles.emptyDesc, { color: 'rgba(255,255,255,0.35)' }]}>
+            <Text style={[styles.emptyDesc, { color: theme.textSecondary }]}>
               {searchQuery
                 ? `No documents or lectures match "${searchQuery}".`
                 : 'Upload documents or add lectures to see them here.'}
@@ -327,11 +336,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(37,31,50,0.72)',
+    borderWidth: 1.5,
+    borderColor: FOREST_BORDER,
+    backgroundColor: FOREST_CARD_BG,
     marginHorizontal: 28,
     marginBottom: 14,
     maxWidth: 1152,
@@ -358,18 +367,15 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 14,
+    gap: 6,
+    paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: FOREST_CARD_BG,
   },
-  chipActive: {
-    backgroundColor: MINT,
-    borderColor: MINT,
-  },
-  chipText: { fontSize: 13, fontWeight: '600' },
+  chipText: { fontSize: 13, fontWeight: '700' },
   listContent: {
     paddingHorizontal: 28,
     paddingBottom: 120,
@@ -385,9 +391,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 40,
     borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(38,38,38,0.85)',
+    borderWidth: 1.5,
+    borderColor: FOREST_BORDER,
+    backgroundColor: FOREST_CARD_BG,
     gap: 8,
   },
   emptyTitle: { ...typography.bodySemi, marginTop: 8 },
