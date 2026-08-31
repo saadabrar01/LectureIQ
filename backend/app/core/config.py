@@ -1,3 +1,4 @@
+import socket
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -50,7 +51,46 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        # Explicit allowlist from env, plus dynamic origins for every trusted
+        # host (localhost / loopback / Android emulator / this machine's LAN IPs)
+        # across the common dev-server port range. This removes the "OPTIONS 400"
+        # preflight failures that happen whenever the frontend serves on a port
+        # not hard-coded into CORS_ORIGINS (e.g. 8082 when 8081 is already taken).
+        explicit = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+        hosts = {"localhost", "127.0.0.1", "10.0.2.2"}
+        try:
+            hosts.update(self._lan_ips())
+        except Exception:
+            pass
+
+        dynamic: list[str] = []
+        for ip in sorted(hosts):
+            # Common Expo / dev ports plus the fallback port shift.
+            for port in list(range(8000, 8100)) + [19000, 19001, 19002, 19006]:
+                dynamic.append(f"http://{ip}:{port}")
+                dynamic.append(f"exp://{ip}:{port}")
+
+        seen = set()
+        result: list[str] = []
+        for origin in explicit + dynamic:
+            if origin not in seen:
+                seen.add(origin)
+                result.append(origin)
+        return result
+
+    @staticmethod
+    def _lan_ips() -> set[str]:
+        ips: set[str] = set()
+        try:
+            hostname = socket.gethostname()
+            for info in socket.getaddrinfo(hostname, None):
+                ip = info[4][0]
+                if ip and not ip.startswith("127.") and ":" not in ip:
+                    ips.add(ip)
+        except Exception:
+            pass
+        return ips
 
 
 @lru_cache

@@ -11,6 +11,7 @@ class Lecture(Base):
     __tablename__ = "lectures"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     channel: Mapped[str] = mapped_column(String(255))
     video_id: Mapped[str] = mapped_column(String(64))
@@ -22,6 +23,7 @@ class Lecture(Base):
     thumbnail: Mapped[str] = mapped_column(String(512))
     duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    user: Mapped["User | None"] = relationship(back_populates="lectures")
     transcript: Mapped[list["TranscriptSegment"]] = relationship(
         back_populates="lecture", cascade="all, delete-orphan", order_by="TranscriptSegment.start"
     )
@@ -55,6 +57,7 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     lecture_id: Mapped[str | None] = mapped_column(ForeignKey("lectures.id"), nullable=True)
     role: Mapped[str] = mapped_column(String(8))  # user|ai
     text: Mapped[str] = mapped_column(Text)
@@ -62,6 +65,7 @@ class ChatMessage(Base):
     citations: Mapped[list | None] = mapped_column(JSON, default=None)  # [{time}]
     saved: Mapped[bool] = mapped_column(default=False)
 
+    user: Mapped["User | None"] = relationship(back_populates="chat_messages")
     lecture: Mapped[Lecture | None] = relationship(back_populates="messages")
 
 
@@ -69,12 +73,14 @@ class Note(Base):
     __tablename__ = "notes"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text)
     lecture_id: Mapped[str | None] = mapped_column(ForeignKey("lectures.id"), nullable=True)
     color: Mapped[str] = mapped_column(String(16), default="#8EF0A3")
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
+    user: Mapped["User | None"] = relationship(back_populates="notes")
     lecture: Mapped[Lecture | None] = relationship(back_populates="notes")
 
     @property
@@ -86,10 +92,12 @@ class Bookmark(Base):
     __tablename__ = "bookmarks"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     lecture_id: Mapped[str] = mapped_column(ForeignKey("lectures.id"))
     quote: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
+    user: Mapped["User | None"] = relationship(back_populates="bookmarks")
     lecture: Mapped[Lecture] = relationship(back_populates="bookmarks")
 
     @property
@@ -128,6 +136,17 @@ class User(Base):
     streak: Mapped[int] = mapped_column(Integer, default=0)
     minutes_watched: Mapped[int] = mapped_column(Integer, default=0)
 
+    lectures: Mapped[list["Lecture"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    documents: Mapped[list["Document"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    notes: Mapped[list["Note"]] = relationship(back_populates="user")
+    bookmarks: Mapped[list["Bookmark"]] = relationship(back_populates="user")
+    chat_messages: Mapped[list["ChatMessage"]] = relationship(back_populates="user")
+    query_history: Mapped[list["QueryHistory"]] = relationship(back_populates="user")
+
 
 class Document(Base):
     """An uploaded PDF or DOCX file that has been indexed for RAG.
@@ -140,6 +159,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     file_name: Mapped[str] = mapped_column(String(512))
     file_path: Mapped[str] = mapped_column(String(1024), default="")
     file_type: Mapped[str] = mapped_column(String(16))  # pdf | docx
@@ -148,6 +168,7 @@ class Document(Base):
     num_chunks: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
+    user: Mapped["User | None"] = relationship(back_populates="documents")
     chunks: Mapped[list["DocumentChunk"]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
@@ -184,6 +205,7 @@ class QueryHistory(Base):
     __tablename__ = "query_history"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
     answer_source: Mapped[str] = mapped_column(String(32), default="llm")
@@ -193,6 +215,8 @@ class QueryHistory(Base):
     )
     sources: Mapped[list | None] = mapped_column(JSONB, default=None)  # grouped RagSource dicts
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    user: Mapped["User | None"] = relationship(back_populates="query_history")
 
 
 class LectureChunk(Base):

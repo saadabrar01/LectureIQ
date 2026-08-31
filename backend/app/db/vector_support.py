@@ -57,10 +57,13 @@ def cosine_rank(
     query_vector: list[float],
     top_k: int,
     document_id: int | None = None,
+    user_id: int | None = None,
 ):
     """Python-side cosine ranking used in degraded (no-pgvector) mode.
 
     Returns rows of (DocumentChunk, Document, distance) mirroring the SQL path.
+    When ``user_id`` is provided, only chunks belonging to that user's documents
+    are considered (user-data isolation).
     """
     import math
 
@@ -77,6 +80,8 @@ def cosine_rank(
         return 1.0 - dot / (na * nb)
 
     stmt = select(DocumentChunk).join(Document, DocumentChunk.document_id == Document.id)
+    if user_id is not None:
+        stmt = stmt.where(Document.user_id == user_id)
     if document_id is not None:
         stmt = stmt.where(DocumentChunk.document_id == document_id)
     chunks = db.scalars(stmt).all()

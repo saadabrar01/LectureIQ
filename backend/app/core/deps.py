@@ -17,6 +17,7 @@ optionally use `get_current_user_optional` which returns None instead of
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
@@ -67,3 +68,43 @@ def get_current_user_optional(
         return get_current_user(authorization=authorization, db=db)
     except HTTPException:
         return None
+
+
+def get_effective_user(
+    authorization: str = Header(default=""),
+    db: Session = Depends(get_db),
+) -> User:
+    """Resolve the user that owns the current session's data.
+
+    - When a valid JWT is supplied, returns that authenticated user.
+    - Otherwise (tokenless/single-user mode) falls back to the active
+      default user, mirroring how /auth/me behaves. This keeps every
+      data-scoped endpoint isolated per user and continues to work
+      until the frontend starts sending tokens.
+    """
+    if authorization:
+        try:
+            return get_current_user(authorization=authorization, db=db)
+        except HTTPException:
+            pass
+
+    # Single-user fallback: the first (oldest) account is treated as the
+    # default active user.
+    user = db.scalar(select(User).order_by(User.id).limit(1))
+    if user is not None:
+        return user
+
+    # No users exist yet — create a default profile so isolation always has
+    # a stable owner and the app never shows an empty workspace.
+    user = User(
+        email="saad@example.com",
+        name="Saad Ahmed",
+        username="saad.ahmed",
+        avatar="SA",
+        join_date="Jan 2026",
+        streak=14,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user

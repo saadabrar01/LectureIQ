@@ -8,9 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.deps import get_effective_user
 from app.db import vector_support
 from app.db.session import get_db
-from app.models import Lecture, LectureChunk, QuizQuestion, TranscriptSegment
+from app.models import Lecture, LectureChunk, QuizQuestion, TranscriptSegment, User
 from app.schemas import (
     LectureAskRequest,
     LectureAskResponse,
@@ -37,17 +38,28 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 @router.get("", response_model=list[LectureOut])
-def list_lectures(db: Session = Depends(get_db)):
-    return db.scalars(select(Lecture).order_by(Lecture.added_at.desc())).all()
+def list_lectures(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
+    return db.scalars(
+        select(Lecture)
+        .where(Lecture.user_id == current_user.id)
+        .order_by(Lecture.added_at.desc())
+    ).all()
 
 
 @router.post("", response_model=LectureOut, status_code=201)
-def create_lecture(payload: LectureCreate, db: Session = Depends(get_db)):
+def create_lecture(
+    payload: LectureCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     data = payload.model_dump()
     data["id"] = data["id"] or uuid4().hex[:12]
     if not data["thumbnail"]:
         data["thumbnail"] = f"https://img.youtube.com/vi/{data['video_id']}/hqdefault.jpg"
-    lecture = Lecture(**data, added_at=datetime.now())
+    lecture = Lecture(**data, user_id=current_user.id, added_at=datetime.now())
     db.add(lecture)
     db.commit()
     db.refresh(lecture)
@@ -55,16 +67,28 @@ def create_lecture(payload: LectureCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{lecture_id}", response_model=LectureDetailOut)
-def get_lecture(lecture_id: str, db: Session = Depends(get_db)):
-    lecture = db.get(Lecture, lecture_id)
+def get_lecture(
+    lecture_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
+    lecture = db.scalar(
+        select(Lecture).where(Lecture.id == lecture_id, Lecture.user_id == current_user.id)
+    )
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     return lecture
 
 
 @router.delete("/{lecture_id}", status_code=204)
-def delete_lecture(lecture_id: str, db: Session = Depends(get_db)):
-    lecture = db.get(Lecture, lecture_id)
+def delete_lecture(
+    lecture_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
+    lecture = db.scalar(
+        select(Lecture).where(Lecture.id == lecture_id, Lecture.user_id == current_user.id)
+    )
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     db.delete(lecture)
@@ -72,8 +96,14 @@ def delete_lecture(lecture_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{lecture_id}/quiz", response_model=list[QuizQuestionOut])
-def list_quiz(lecture_id: str, db: Session = Depends(get_db)):
-    if not db.get(Lecture, lecture_id):
+def list_quiz(
+    lecture_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
+    if not db.scalar(
+        select(Lecture).where(Lecture.id == lecture_id, Lecture.user_id == current_user.id)
+    ):
         raise HTTPException(status_code=404, detail="Lecture not found")
     return db.scalars(
         select(QuizQuestion).where(QuizQuestion.lecture_id == lecture_id)
@@ -85,9 +115,17 @@ TOP_K = 6
 
 @router.post("/{lecture_id}/ask", response_model=LectureAskResponse)
 @limiter.limit("30/minute")
-def ask_lecture(request: Request, lecture_id: str, payload: LectureAskRequest, db: Session = Depends(get_db)):
+def ask_lecture(
+    request: Request,
+    lecture_id: str,
+    payload: LectureAskRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     """Answer a question scoped to a lecture's transcript chunks."""
-    lecture = db.get(Lecture, lecture_id)
+    lecture = db.scalar(
+        select(Lecture).where(Lecture.id == lecture_id, Lecture.user_id == current_user.id)
+    )
     if lecture is None:
         raise HTTPException(status_code=404, detail="Lecture not found")
 
@@ -148,15 +186,25 @@ def ask_lecture(request: Request, lecture_id: str, payload: LectureAskRequest, d
 
 @router.post("/youtube", response_model=LectureOut, status_code=201)
 @limiter.limit("10/hour")
-def import_youtube_lecture(request: Request, payload: YouTubeImportRequest, db: Session = Depends(get_db)):
+def import_youtube_lecture(
+    request: Request,
+    payload: YouTubeImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     """Import a YouTube video URL, fetch transcript, chunk & embed into vector DB."""
     try:
         video_id = extract_youtube_id(payload.url)
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err))
 
-    # Check if lecture with video_id already exists
-    existing = db.scalar(select(Lecture).where(Lecture.video_id == video_id))
+    # Check if lecture with video_id already exists for this user
+    existing = db.scalar(
+        select(Lecture).where(
+            Lecture.video_id == video_id,
+            Lecture.user_id == current_user.id,
+        )
+    )
     if existing:
         return existing
 
@@ -166,6 +214,7 @@ def import_youtube_lecture(request: Request, payload: YouTubeImportRequest, db: 
 
     lecture = Lecture(
         id=lecture_id,
+        user_id=current_user.id,
         title=meta["title"],
         channel=meta["channel"],
         video_id=video_id,
@@ -229,6 +278,7 @@ def upload_video_lecture(
     file: UploadFile = File(...),
     title: str = "",
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
 ):
     """Accept a local video/audio file, transcribe it via Whisper, chunk & embed."""
     import os
@@ -272,6 +322,7 @@ def upload_video_lecture(
 
     lecture = Lecture(
         id=lecture_id,
+        user_id=current_user.id,
         title=file_title[:255],
         channel="Local Upload",
         video_id=video_id,

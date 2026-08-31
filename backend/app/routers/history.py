@@ -8,8 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.deps import get_effective_user
 from app.db.session import get_db
-from app.models import QueryHistory
+from app.models import QueryHistory, User
 from app.schemas import HistoryOut
 
 router = APIRouter(prefix="/history", tags=["history"])
@@ -20,16 +21,32 @@ def list_history(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
 ):
-    """Return the most recent Q&A interactions, newest first."""
-    stmt = select(QueryHistory).order_by(QueryHistory.created_at.desc()).limit(limit).offset(offset)
+    """Return the most recent Q&A interactions for the current user, newest first."""
+    stmt = (
+        select(QueryHistory)
+        .where(QueryHistory.user_id == current_user.id)
+        .order_by(QueryHistory.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     return db.scalars(stmt).all()
 
 
 @router.delete("/{history_id}", status_code=204)
-def delete_history_item(history_id: int, db: Session = Depends(get_db)):
-    """Remove a single history entry."""
-    item = db.get(QueryHistory, history_id)
+def delete_history_item(
+    history_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
+    """Remove a single history entry owned by the current user."""
+    item = db.scalar(
+        select(QueryHistory).where(
+            QueryHistory.id == history_id,
+            QueryHistory.user_id == current_user.id,
+        )
+    )
     if not item:
         raise HTTPException(status_code=404, detail="History entry not found")
     db.delete(item)
@@ -37,8 +54,13 @@ def delete_history_item(history_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("", status_code=204)
-def clear_history(db: Session = Depends(get_db)):
-    """Clear the entire query history."""
-    for item in db.scalars(select(QueryHistory)).all():
+def clear_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
+    """Clear the current user's query history."""
+    for item in db.scalars(
+        select(QueryHistory).where(QueryHistory.user_id == current_user.id)
+    ).all():
         db.delete(item)
     db.commit()

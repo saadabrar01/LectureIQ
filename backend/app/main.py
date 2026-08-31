@@ -71,6 +71,60 @@ async def lifespan(_: FastAPI):
             "ON lecture_chunks (lecture_id)"
         ))
         conn.execute(text("ALTER TABLE lectures ADD COLUMN IF NOT EXISTS duration_sec INTEGER"))
+        # --- User-data isolation columns -------------------------------------
+        # Each owned resource gets a nullable user_id FK so it can be scoped
+        # to the user who uploaded/created it. Nullable keeps legacy rows
+        # working; new writes always set it to the current user.
+        conn.execute(text(
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS user_id INTEGER "
+            "REFERENCES users(id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE lectures ADD COLUMN IF NOT EXISTS user_id INTEGER "
+            "REFERENCES users(id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE notes ADD COLUMN IF NOT EXISTS user_id INTEGER "
+            "REFERENCES users(id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bookmarks ADD COLUMN IF NOT EXISTS user_id INTEGER "
+            "REFERENCES users(id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS user_id INTEGER "
+            "REFERENCES users(id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS user_id INTEGER "
+            "REFERENCES users(id)"
+        ))
+        # Backfill: assign existing rows to the default (first) user so nothing
+        # is orphaned after the schema change.
+        conn.execute(text(
+            "UPDATE documents SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1) "
+            "WHERE user_id IS NULL"
+        ))
+        conn.execute(text(
+            "UPDATE lectures SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1) "
+            "WHERE user_id IS NULL"
+        ))
+        conn.execute(text(
+            "UPDATE notes SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1) "
+            "WHERE user_id IS NULL"
+        ))
+        conn.execute(text(
+            "UPDATE bookmarks SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1) "
+            "WHERE user_id IS NULL"
+        ))
+        conn.execute(text(
+            "UPDATE chat_messages SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1) "
+            "WHERE user_id IS NULL"
+        ))
+        conn.execute(text(
+            "UPDATE query_history SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1) "
+            "WHERE user_id IS NULL"
+        ))
     yield
 
 

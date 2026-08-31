@@ -21,9 +21,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
+from app.core.deps import get_effective_user
 from app.db import vector_support
 from app.db.session import get_db
-from app.models import Document, DocumentChunk, QueryHistory
+from app.models import Document, DocumentChunk, QueryHistory, User
 from app.schemas import (
     AskRagRequest,
     AskRagResponse,
@@ -47,7 +48,12 @@ ALLOWED_TYPES = {"pdf": "pdf", "docx": "docx", "doc": "docx"}
 
 @router.post("/upload-doc", response_model=UploadDocResponse, status_code=201)
 @limiter.limit("10/hour")
-async def upload_doc(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_doc(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     """Index an uploaded PDF or DOCX document for retrieval."""
     # --- Validate file type -------------------------------------------------
     raw_suffix = (file.filename or "").rsplit(".", 1)[-1].lower()
@@ -97,6 +103,7 @@ async def upload_doc(request: Request, file: UploadFile = File(...), db: Session
 
     # --- Persist metadata + chunks in a single transaction ---------------------
     document = Document(
+        user_id=current_user.id,
         file_name=file.filename or f"upload.{suffix}",
         file_path=str(stored_path),
         file_type=suffix,
@@ -137,7 +144,12 @@ async def upload_doc(request: Request, file: UploadFile = File(...), db: Session
 
 @router.post("/ask-rag", response_model=AskRagResponse)
 @limiter.limit("30/minute")
-def ask_rag(request: Request, payload: AskRagRequest, db: Session = Depends(get_db)):
+def ask_rag(
+    request: Request,
+    payload: AskRagRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     """Answer a question using similarity search over indexed documents."""
     question = payload.question.strip()
     if not question:
@@ -153,14 +165,20 @@ def ask_rag(request: Request, payload: AskRagRequest, db: Session = Depends(get_
         stmt = (
             select(DocumentChunk, Document, DocumentChunk.embedding.cosine_distance(query_vector))
             .join(Document, DocumentChunk.document_id == Document.id)
+            .where(Document.user_id == current_user.id)
             .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
             .limit(top_k)
         )
         if payload.document_id is not None:
-            stmt = stmt.where(DocumentChunk.document_id == payload.document_id)
+            stmt = stmt.where(
+                DocumentChunk.document_id == payload.document_id,
+                Document.id == payload.document_id,
+            )
         rows = db.execute(stmt).all()
     else:
-        rows = vector_support.cosine_rank(db, query_vector, top_k, payload.document_id)
+        rows = vector_support.cosine_rank(
+            db, query_vector, top_k, payload.document_id, user_id=current_user.id
+        )
     if not rows:
         raise HTTPException(
             status_code=404,
@@ -213,6 +231,7 @@ def ask_rag(request: Request, payload: AskRagRequest, db: Session = Depends(get_
     # --- Record the interaction for the Activity Log screen --------------------
     db.add(
         QueryHistory(
+            user_id=current_user.id,
             question=question,
             answer=answer,
             answer_source=answer_source,
@@ -229,15 +248,31 @@ def ask_rag(request: Request, payload: AskRagRequest, db: Session = Depends(get_
 
 
 @router.get("/documents", response_model=list[DocumentOut])
-def list_documents(db: Session = Depends(get_db)):
-    """List all indexed documents."""
-    return db.scalars(select(Document).order_by(Document.created_at.desc())).all()
+def list_documents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
+    """List documents owned by the current user."""
+    return db.scalars(
+        select(Document)
+        .where(Document.user_id == current_user.id)
+        .order_by(Document.created_at.desc())
+    ).all()
 
 
 @router.get("/documents/{document_id}/download")
-def download_document(document_id: int, db: Session = Depends(get_db)):
+def download_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     """Download the original uploaded file from the uploads directory."""
-    document = db.get(Document, document_id)
+    document = db.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.user_id == current_user.id,
+        )
+    )
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     if not document.file_path:
@@ -256,9 +291,18 @@ def download_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/documents/{document_id}", status_code=204)
-def delete_document(document_id: int, db: Session = Depends(get_db)):
+def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     """Delete a document, its chunks (cascade) and the stored file on disk."""
-    document = db.get(Document, document_id)
+    document = db.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.user_id == current_user.id,
+        )
+    )
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     file_path = Path(document.file_path) if document.file_path else None
@@ -270,9 +314,20 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
 
 @router.post("/documents/{document_id}/ask", response_model=AskRagResponse)
 @limiter.limit("30/minute")
-def ask_document(request: Request, document_id: int, payload: AskRagRequest, db: Session = Depends(get_db)):
+def ask_document(
+    request: Request,
+    document_id: int,
+    payload: AskRagRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     """Answer a question scoped to a single document."""
-    document = db.get(Document, document_id)
+    document = db.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.user_id == current_user.id,
+        )
+    )
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -287,13 +342,18 @@ def ask_document(request: Request, document_id: int, payload: AskRagRequest, db:
         stmt = (
             select(DocumentChunk, Document, DocumentChunk.embedding.cosine_distance(query_vector))
             .join(Document, DocumentChunk.document_id == Document.id)
-            .where(DocumentChunk.document_id == document_id)
+            .where(
+                DocumentChunk.document_id == document_id,
+                Document.user_id == current_user.id,
+            )
             .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
             .limit(top_k)
         )
         rows = db.execute(stmt).all()
     else:
-        rows = vector_support.cosine_rank(db, query_vector, top_k, document_id)
+        rows = vector_support.cosine_rank(
+            db, query_vector, top_k, document_id, user_id=current_user.id
+        )
 
     if not rows:
         raise HTTPException(status_code=422, detail="This document has no indexed content yet")

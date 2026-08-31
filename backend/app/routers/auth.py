@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.deps import get_effective_user
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models import User
@@ -26,36 +27,22 @@ ALLOWED_AVATAR_TYPES = {"jpg", "jpeg", "png", "webp"}
 
 
 @router.get("/me", response_model=UserOut)
-def get_me(db: Session = Depends(get_db)):
-    """Fetch current user profile from database or return default."""
-    user = db.scalars(select(User).limit(1)).first()
-    if not user:
-        user = User(
-            email="saad@example.com",
-            name="Saad Ahmed",
-            username="saad.ahmed",
-            avatar="SA",
-            join_date="Jan 2026",
-            streak=14,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return user
+def get_me(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
+    """Fetch the current user profile (authenticated user, else default)."""
+    return current_user
 
 
 @router.put("/profile", response_model=UserOut)
-def update_profile(payload: ProfileUpdateRequest, db: Session = Depends(get_db)):
+def update_profile(
+    payload: ProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
+):
     """Update profile data (name, username, email, bio, avatar_url) in PostgreSQL."""
-    user = db.scalars(select(User).limit(1)).first()
-    if not user:
-        user = User(
-            email="saad@example.com",
-            name="Saad Ahmed",
-            avatar="SA",
-            join_date="Jan 2026",
-        )
-        db.add(user)
+    user = current_user
 
     if payload.name is not None and payload.name.strip():
         user.name = payload.name.strip()
@@ -77,7 +64,9 @@ def update_profile(payload: ProfileUpdateRequest, db: Session = Depends(get_db))
 
 @router.post("/upload-avatar")
 async def upload_avatar(
-    file: UploadFile = File(...), db: Session = Depends(get_db)
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_effective_user),
 ):
     """Upload user avatar image file, save to disk, and update PostgreSQL user record."""
     file_bytes = await file.read()
@@ -111,11 +100,9 @@ async def upload_avatar(
 
     avatar_url = f"/uploads/avatars/{filename}"
 
-    user = db.scalars(select(User).limit(1)).first()
-    if user:
-        user.avatar_url = avatar_url
-        db.commit()
-        db.refresh(user)
+    current_user.avatar_url = avatar_url
+    db.commit()
+    db.refresh(current_user)
 
     return {"avatar_url": avatar_url}
 
