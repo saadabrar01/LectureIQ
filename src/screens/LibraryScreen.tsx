@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../context/ThemeContext';
@@ -120,15 +120,19 @@ export function LibraryScreen() {
   }, []);
 
   useEffect(() => {
-    setLoading(true);
-    load().finally(() => setLoading(false));
-  }, [load]);
-
-  useEffect(() => {
     if (!error) return;
     const t = setTimeout(() => setError(''), 3000);
     return () => clearTimeout(t);
   }, [error]);
+
+  // Reload every time the Library tab gains focus, so documents or lectures
+  // uploaded on another screen appear here immediately.
+  useFocusEffect(
+    useCallback(() => {
+      if (items.length === 0) setLoading(true);
+      load().finally(() => setLoading(false));
+    }, [load, items.length])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

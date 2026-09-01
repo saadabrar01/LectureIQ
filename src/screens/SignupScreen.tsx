@@ -43,17 +43,18 @@ export function SignupScreen() {
       (navigation as any).navigate('Main');
     } catch (err) {
       const apiErr = err as ApiError;
-      if (apiErr.status === 0 || apiErr.status === 404) {
+      const message = apiErr?.message ?? 'Something went wrong. Please try again.';
+      if (apiErr?.status === 0) {
         haptics.success();
         (navigation as any).navigate('Main');
       } else {
         haptics.warning();
-        if (apiErr.status === 409 || /email/i.test(apiErr.message)) {
-          setErrors({ email: apiErr.message });
-        } else if (/password/i.test(apiErr.message)) {
-          setErrors({ password: apiErr.message });
+        if (apiErr?.status === 409 || /email/i.test(message)) {
+          setErrors({ email: message });
+        } else if (/password/i.test(message)) {
+          setErrors({ password: message });
         } else {
-          Alert.alert('Registration Failed', apiErr.message);
+          Alert.alert('Registration Failed', message);
         }
       }
     } finally {

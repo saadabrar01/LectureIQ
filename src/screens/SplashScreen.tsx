@@ -12,6 +12,7 @@ import Animated, {
 import { useNavigation } from '@react-navigation/native';
 import { typography } from '../theme/typography';
 import { onboardingPalette } from '../theme/onboarding';
+import { loadToken } from '../services/api';
 
 export function SplashScreen() {
   const navigation = useNavigation();
@@ -21,8 +22,9 @@ export function SplashScreen() {
   useEffect(() => {
     scale.value = withTiming(1, { duration: 900 });
     opacity.value = withTiming(1, { duration: 900 });
-    const timer = setTimeout(() => {
-      navigation.navigate('Onboarding');
+    const timer = setTimeout(async () => {
+      const token = await loadToken();
+      navigation.navigate(token ? 'Main' : 'Onboarding');
     }, 2200);
     return () => clearTimeout(timer);
   }, [navigation, scale, opacity]);

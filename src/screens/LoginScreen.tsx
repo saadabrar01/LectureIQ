@@ -41,17 +41,18 @@ export function LoginScreen() {
       (navigation as any).navigate('Main');
     } catch (err) {
       const apiErr = err as ApiError;
-      if (apiErr.status === 0 || apiErr.status === 404) {
+      const message = apiErr?.message ?? 'Something went wrong. Please try again.';
+      if (apiErr?.status === 0) {
         haptics.success();
         (navigation as any).navigate('Main');
       } else {
         haptics.warning();
-        if (/password/i.test(apiErr.message)) {
-          setErrors({ password: apiErr.message });
-        } else if (/email|user/i.test(apiErr.message)) {
-          setErrors({ email: apiErr.message });
+        if (/password/i.test(message)) {
+          setErrors({ password: message });
+        } else if (/email|user/i.test(message)) {
+          setErrors({ email: message });
         } else {
-          Alert.alert('Sign in', apiErr.message);
+          Alert.alert('Sign in', message);
         }
       }
     } finally {

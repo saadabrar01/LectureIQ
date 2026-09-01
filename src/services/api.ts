@@ -1,5 +1,47 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+export const TOKEN_STORAGE_KEY = '@lectureiq_auth_token';
+
+// In-memory token cache so `request()` can attach the header synchronously.
+let cachedToken: string | null = null;
+
+export function getToken(): string | null {
+  return cachedToken;
+}
+
+export async function setToken(token: string | null): Promise<void> {
+  cachedToken = token;
+  try {
+    if (token) {
+      await AsyncStorage.setItem(TOKEN_STORAGE_KEY, token);
+    } else {
+      await AsyncStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // storage failure is non-fatal; in-memory token still works for the session
+  }
+}
+
+export async function loadToken(): Promise<string | null> {
+  try {
+    const token = await AsyncStorage.getItem(TOKEN_STORAGE_KEY);
+    cachedToken = token;
+    return token;
+  } catch {
+    return cachedToken;
+  }
+}
+
+/** Build headers for an outgoing request, attaching the Bearer token if present. */
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...(extra ?? {}) };
+  if (cachedToken) {
+    headers.Authorization = `Bearer ${cachedToken}`;
+  }
+  return headers;
+}
 
 function getDevHost(): string {
   const hostUri = Constants.expoConfig?.hostUri;
@@ -41,7 +83,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+        ...(init?.headers ?? {}),
+      },
     });
   } catch {
     throw {
@@ -106,6 +152,7 @@ export const authApi = {
 
     const res = await fetch(`${API_BASE_URL}/api/auth/upload-avatar`, {
       method: 'POST',
+      headers: authHeaders(),
       body: form,
     });
     if (!res.ok) {
@@ -113,16 +160,30 @@ export const authApi = {
     }
     return (await res.json()) as { avatar_url: string };
   },
-  signUp: (name: string, email: string, password: string) =>
-    request<AuthUser>('/api/auth/signup', {
+  signUp: async (name: string, email: string, password: string) => {
+    const result = await request<{
+      access_token: string;
+      token_type: string;
+      expires_in: number;
+    }>('/api/auth/signup-token', {
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
-    }),
-  signIn: (email: string, password: string) =>
-    request<AuthUser>('/api/auth/login', {
+    });
+    void setToken(result.access_token);
+    return request<AuthUser>('/api/auth/me');
+  },
+  signIn: async (email: string, password: string) => {
+    const result = await request<{
+      access_token: string;
+      token_type: string;
+      expires_in: number;
+    }>('/api/auth/login-token', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
-    }),
+    });
+    void setToken(result.access_token);
+    return request<AuthUser>('/api/auth/me');
+  },
 };
 
 // --- Documents / RAG -------------------------------------------------------
@@ -200,6 +261,7 @@ async function uploadDocument(asset: {
   try {
     res = await fetch(`${API_BASE_URL}/api/upload-doc`, {
       method: 'POST',
+      headers: authHeaders(),
       body: form,
     });
   } catch {
@@ -336,6 +398,7 @@ export const lecturesApi = {
     try {
       res = await fetch(`${API_BASE_URL}/api/lectures/upload-video`, {
         method: 'POST',
+        headers: authHeaders(),
         body: form,
       });
     } catch {
