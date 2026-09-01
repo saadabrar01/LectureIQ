@@ -1,69 +1,55 @@
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Image,
-  ImageBackground,
   Platform,
   Pressable,
   PressableStateCallbackType,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
 import * as DocumentPicker from "expo-document-picker";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppTheme } from "../context/ThemeContext";
 import { typography } from "../theme/typography";
-import { lectures, userProfile } from "../data/mock";
-import { StatusBadge } from "../components/StatusBadge";
-import { FadeUp, GlowChip } from "../components/FadeUp";
-import { timeAgo, formatClock, haptics } from "../utils/helpers";
-import { authApi, documentsApi, getAvatarUrl, type AuthUser } from "../services/api";
-import type { Lecture } from "../data/mock";
+import { userProfile } from "../data/mock";
+import { FadeUp } from "../components/FadeUp";
+import { haptics } from "../utils/helpers";
+import {
+  authApi,
+  documentsApi,
+  getAvatarUrl,
+  historyApi,
+  lecturesApi,
+  statsApi,
+  type AuthUser,
+  type HistoryItem,
+  type LectureItem,
+} from "../services/api";
 
 // ---------------------------------------------------------------------------
-// Palette — cohesive emerald → teal → lavender family (matches Profile screen)
+// Locked reference palette — flat surfaces only (no gradients, no glow)
 // ---------------------------------------------------------------------------
-const ACCENTS = {
-  emerald: "#34D399",
-  teal: "#2DD4BF",
-  mint: "#8EF0A3",
+const C = {
+  bg: "#0A0F0C",
+  card: "#111A16",
+  hairline: "rgba(255,255,255,0.07)",
+  green: "#22C55E",
+  greenText: "#4ADE80",
+  amber: "#FFB84D",
   blue: "#38BDF8",
-  lavender: "#9F8FF0",
-  amber: "#FBBF24",
+  teal: "#14B8A6",
+  purple: "#A78BFA",
+  purpleDark: "#241B4D",
+  text: "#FFFFFF",
+  muted: "#7C8B84",
 };
 
-const STAT_CARDS = [
-  {
-    key: "lectures" as const,
-    icon: "library-books" as const,
-    title: "Lectures",
-    desc: "Browse your indexed video lectures.",
-    color: ACCENTS.emerald,
-    grad: ["#34D399", "#0EA5A0"] as const,
-  },
-  {
-    key: "questions" as const,
-    icon: "question-answer" as const,
-    title: "Q&A Chat",
-    desc: "Ask AI questions about your content.",
-    color: ACCENTS.teal,
-    grad: ["#2DD4BF", "#38BDF8"] as const,
-  },
-  {
-    key: "processing" as const,
-    icon: "description" as const,
-    title: "Knowledge Base",
-    desc: "Interact with uploaded PDF/DOC notes.",
-    color: ACCENTS.lavender,
-    grad: ["#A78BFA", "#6D8BFA"] as const,
-  },
-];
+const WEEK_DOTS = 7;
 
 // `hovered` is a web-only field RN's types don't expose yet.
 function getHovered(state: PressableStateCallbackType): boolean {
@@ -73,43 +59,58 @@ function getHovered(state: PressableStateCallbackType): boolean {
 export function HomeScreen() {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
 
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [lectureCount, setLectureCount] = useState<number>(0);
+  const [docCount, setDocCount] = useState<number>(0);
+  const [streak, setStreak] = useState<number>(0);
+  const [questionsAsked, setQuestionsAsked] = useState<number>(0);
+  const [minutesWatched, setMinutesWatched] = useState<number>(0);
+  const [lectures, setLectures] = useState<LectureItem[]>([]);
+  const [recentQa, setRecentQa] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [docError, setDocError] = useState("");
 
-  const loadUser = useCallback(async () => {
-    try {
-      const u = await authApi.getMe().catch(() => null);
-      if (u) setUser(u);
-    } catch {
-      // fallback to mock profile
-    }
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
-      loadUser();
-    }, [loadUser])
+      let active = true;
+      const load = async () => {
+        setLoading(true);
+        const [u, l, d, s, h] = await Promise.allSettled([
+          authApi.getMe(),
+          lecturesApi.list(),
+          documentsApi.list(),
+          statsApi.get(),
+          historyApi.list(1),
+        ]);
+        if (!active) return;
+        if (u.status === "fulfilled") setUser(u.value);
+        if (l.status === "fulfilled") {
+          setLectures(l.value);
+          setLectureCount(l.value.length);
+        }
+        if (d.status === "fulfilled") setDocCount(d.value.length);
+        if (s.status === "fulfilled") {
+          setStreak(s.value.streak);
+          setQuestionsAsked(s.value.questions_asked);
+          setMinutesWatched(s.value.minutes_watched);
+        }
+        if (h.status === "fulfilled") setRecentQa(h.value);
+        setLoading(false);
+      };
+      load();
+      return () => {
+        active = false;
+      };
+    }, [])
   );
 
-  const openLecture = (lecture: Lecture) => {
-    haptics.light();
-    (navigation as any).navigate("LectureDetail", { lectureId: lecture.id });
-  };
-
-  const handleStatCardPress = (key: "lectures" | "questions" | "processing") => {
-    haptics.light();
-    if (key === "questions") {
-      const firstLectureId = lectures[0]?.id || "1";
-      (navigation as any).navigate("Chat", { lectureId: firstLectureId });
-    } else if (key === "lectures") {
-      (navigation as any).navigate("Library");
-    } else if (key === "processing") {
-      (navigation as any).navigate("Documents");
-    }
-  };
+  const goLibrary = () => navigation.navigate("Library");
+  const goChat = () => navigation.navigate("Chat", { lectureId: "1" });
+  const goDocuments = () => navigation.navigate("Documents");
+  const goAddLecture = () => navigation.navigate("AddLecture");
 
   const handlePickDocument = async () => {
     haptics.light();
@@ -138,9 +139,8 @@ export function HomeScreen() {
       });
 
       haptics.success();
-
-      // Open DocumentChat for the uploaded document
-      (navigation as any).navigate("DocumentChat", {
+      setDocCount((c) => c + 1);
+      navigation.navigate("DocumentChat", {
         documentId: uploaded.document_id,
         documentName: asset.name || "document.pdf",
         fileType: asset.name?.endsWith(".docx") ? "docx" : "pdf",
@@ -153,53 +153,74 @@ export function HomeScreen() {
     }
   };
 
-  const handleAddVideo = () => {
-    haptics.light();
-    (navigation as any).navigate("AddLecture");
-  };
-
   const displayName = user?.name || userProfile.name;
+  const firstInitial = displayName.trim().charAt(0).toUpperCase() || "B";
   const displayAvatarUrl = getAvatarUrl(user?.avatar_url);
-  const displayAvatarText = user?.avatar || userProfile.avatar;
+  const displayAvatarText = user?.avatar || firstInitial;
 
-  const renderHeader = () => (
-    <>
-      {/* Top Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={[styles.greeting, { color: "rgba(255,255,255,0.55)" }]}>
-            Welcome back 👋
-          </Text>
-          <Text style={[styles.name, { color: "#F7FAF8" }]}>
-            {displayName}
-          </Text>
-        </View>
-        <Pressable
-          onPress={() => (navigation as any).navigate("Profile")}
-          style={({ pressed }) => [
-            styles.profileBtn,
-            pressed && { transform: [{ scale: 0.94 }] },
-          ]}
-        >
-          <View style={styles.avatarGlow} />
-          <LinearGradient
-            colors={["#34D399", "#2DD4BF", "#38BDF8"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.avatarRing}
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  const activeStreakDots = Math.min(Math.max(streak, 0), WEEK_DOTS);
+  const streakPct = Math.min(Math.round((streak / 30) * 100), 100);
+
+  // Latest Q&A activity (if any) becomes the Recent Q&A highlight.
+  const latestQa = recentQa[0];
+  const qaSource = latestQa
+    ? latestQa.answer_source || "Your documents"
+    : "Ask your first question";
+
+  // Today's quiz is generated from the most recent lecture, if available.
+  const quizLecture = lectures[0];
+  const quizTitle = quizLecture?.title || "your latest lecture";
+  const quizLectureId = quizLecture?.id || "1";
+
+  return (
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: insets.top + 22 },
+      ]}
+    >
+      {/* ==================== WELCOME HEADER ==================== */}
+      <FadeUp index={0}>
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <Text style={[styles.greeting, { color: C.muted }]}>{greeting}</Text>
+            <Text style={[styles.name, { color: C.text }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+          </View>
+
+          {/* Avatar with green ring + flame streak badge */}
+          <Pressable
+            onPress={() => navigation.navigate("Profile")}
+            style={({ pressed }) => [
+              styles.avatarWrap,
+              pressed && { transform: [{ scale: 0.95 }] },
+            ]}
           >
-            {displayAvatarUrl ? (
-              <Image source={{ uri: displayAvatarUrl }} style={styles.profileAvatarImg} />
-            ) : (
-              <View style={styles.avatarFill}>
-                <Text style={styles.profileAvatarText}>{displayAvatarText}</Text>
-              </View>
-            )}
-          </LinearGradient>
-        </Pressable>
-      </View>
+            <View style={[styles.avatarRing, { borderColor: C.green }]}>
+              {displayAvatarUrl ? (
+                <Image source={{ uri: displayAvatarUrl }} style={styles.avatarImg} />
+              ) : (
+                <View style={styles.avatarFill}>
+                  <Text style={[styles.avatarText, { color: C.text }]}>
+                    {displayAvatarText}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <View style={[styles.streakBadge, { backgroundColor: C.amber }]}>
+              <MaterialIcons name="local-fire-department" size={13} color="#3B2A00" />
+            </View>
+          </Pressable>
+        </View>
+      </FadeUp>
 
-      {/* Error Alert */}
+      {/* ==================== ERROR ==================== */}
       {docError ? (
         <View style={styles.errorBanner}>
           <MaterialIcons name="error-outline" size={16} color="#F87171" />
@@ -210,688 +231,658 @@ export function HomeScreen() {
         </View>
       ) : null}
 
-      {/* ================== UPLOAD CONTENT ================== */}
-      <FadeUp index={0}>
-        <View style={styles.dualUploadWrap}>
-          <LinearGradient
-            colors={["rgba(52,211,153,0.1)", "rgba(56,189,248,0.04)"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.dualUploadGlow}
-          />
-          <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFill} />
+      {/* ==================== LOADING ==================== */}
+      {loading ? (
+        <View style={styles.loadingBar}>
+          <ActivityIndicator size="small" color={C.green} />
+          <Text style={[styles.loadingText, { color: C.muted }]}>
+            Loading your dashboard…
+          </Text>
+        </View>
+      ) : null}
 
-          <View style={styles.dualUploadHeader}>
-            <View style={styles.uploadHeaderIcon}>
-              <MaterialIcons name="cloud-upload" size={18} color="#FFFFFF" />
-            </View>
-            <View style={styles.uploadHeaderText}>
-              <Text style={[styles.dualUploadTitle, { color: "#F7FAF8" }]}>
-                Upload Content
-              </Text>
-              <Text style={styles.dualUploadSub}>
-                Choose what you want to study
-              </Text>
+      {/* ==================== STATS ROW ==================== */}
+      <FadeUp index={1}>
+        <View style={styles.statsGrid}>
+          {/* Lectures indexed */}
+          <View style={styles.statCard}>
+            <MaterialIcons name="play-circle-outline" size={22} color={C.green} />
+            <Text style={[styles.statValue, { color: C.text }]}>{lectureCount}</Text>
+            <Text style={[styles.statLabel, { color: C.muted }]}>Lectures indexed</Text>
+            <Pressable onPress={goLibrary} style={({ pressed }) => [pressed && { opacity: 0.6 }]} hitSlop={6}>
+              <Text style={[styles.statLink, { color: C.blue }]}>Get started →</Text>
+            </Pressable>
+          </View>
+
+          {/* Day streak */}
+          <View style={styles.statCard}>
+            <MaterialIcons name="local-fire-department" size={22} color={C.amber} />
+            <Text style={[styles.statValue, { color: C.text }]}>{streak}</Text>
+            <Text style={[styles.statLabel, { color: C.muted }]}>Day streak</Text>
+            <View style={styles.dotsRow}>
+              {Array.from({ length: WEEK_DOTS }).map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.streakDot,
+                    { backgroundColor: i < activeStreakDots ? C.amber : C.amber + "33" },
+                  ]}
+                />
+              ))}
             </View>
           </View>
 
-          <View style={styles.dualUploadRow}>
-            {/* Side 1: Document / Notes (.pdf, .doc) */}
-            <Pressable
-              onPress={handlePickDocument}
-              disabled={uploadingDoc}
-              style={(state) => {
-                const hovered = getHovered(state);
-                return [
-                  styles.dualUploadCard,
-                  styles.dualUploadCardDoc,
-                  state.pressed ? styles.cardPressed : null,
-                  hovered ? { transform: [{ translateY: -3 }], borderColor: "#34D39966" } : null,
-                ];
-              }}
-            >
-              <View style={[styles.dualIconGlow, { backgroundColor: "#34D39933" }]} />
-              <LinearGradient
-                colors={["#34D399", "#0EA5A0"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.dualIconBg, { borderColor: "#34D39966" }]}
-              >
-                {uploadingDoc ? (
-                  <ActivityIndicator color="#06281A" size="small" />
-                ) : (
-                  <MaterialIcons name="description" size={22} color="#FFFFFF" />
-                )}
-              </LinearGradient>
+          {/* Questions asked */}
+          <View style={styles.statCard}>
+            <MaterialIcons name="chat-bubble-outline" size={22} color={C.blue} />
+            <Text style={[styles.statValue, { color: C.text }]}>{questionsAsked}</Text>
+            <Text style={[styles.statLabel, { color: C.muted }]}>Questions asked</Text>
+            <Text style={[styles.statTrend, { color: C.greenText }]}>+{minutesWatched} min watched</Text>
+          </View>
 
-              <Text style={styles.dualCardTitle}>Notes & PDF</Text>
-              <Text style={styles.dualCardMeta}>.doc, .docx, .pdf files</Text>
-
-              <LinearGradient
-                colors={["#34D399", "#0EA5A0"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.dualCardBadge}
-              >
-                <Text style={[styles.dualCardBadgeText, { color: "#06281A" }]}>
-                  Upload Notes
-                </Text>
-                <MaterialIcons name="add" size={14} color="#06281A" />
-              </LinearGradient>
-            </Pressable>
-
-            {/* Side 2: Video Lectures (YouTube) */}
-            <Pressable
-              onPress={handleAddVideo}
-              style={(state) => {
-                const hovered = getHovered(state);
-                return [
-                  styles.dualUploadCard,
-                  styles.dualUploadCardVideo,
-                  state.pressed ? styles.cardPressed : null,
-                  hovered ? { transform: [{ translateY: -3 }], borderColor: "#38BDF866" } : null,
-                ];
-              }}
-            >
-              <View style={[styles.dualIconGlow, { backgroundColor: "#38BDF833" }]} />
-              <LinearGradient
-                colors={["#2DD4BF", "#38BDF8"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.dualIconBg, { borderColor: "#38BDF866" }]}
-              >
-                <MaterialIcons name="smart-display" size={22} color="#FFFFFF" />
-              </LinearGradient>
-
-              <Text style={styles.dualCardTitle}>Video Lecture</Text>
-              <Text style={styles.dualCardMeta}>YouTube video URLs</Text>
-
-              <LinearGradient
-                colors={["#2DD4BF", "#38BDF8"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.dualCardBadge}
-              >
-                <Text style={[styles.dualCardBadgeText, { color: "#06281A" }]}>
-                  Add Video
-                </Text>
-                <MaterialIcons name="add" size={14} color="#06281A" />
-              </LinearGradient>
-            </Pressable>
+          {/* Docs uploaded */}
+          <View style={styles.statCard}>
+            <MaterialIcons name="description" size={22} color={C.purple} />
+            <Text style={[styles.statValue, { color: C.text }]}>{docCount}</Text>
+            <Text style={[styles.statLabel, { color: C.muted }]}>Docs uploaded</Text>
           </View>
         </View>
       </FadeUp>
 
-      {/* ================== QUICK ACTION CARDS ================== */}
-      <View style={styles.statsWrap}>
-        <LinearGradient
-          colors={["rgba(52,211,153,0.1)", "rgba(159,143,240,0.08)", "rgba(0,0,0,0)"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.statsGlow}
-        />
+      {/* ==================== UPLOAD CONTENT ==================== */}
+      <FadeUp index={2}>
+        <View style={styles.uploadOuter}>
+          <View style={styles.sectionHead}>
+            <Text style={[styles.sectionTitle, { color: C.text }]}>Upload content</Text>
+            <Text style={[styles.sectionSub, { color: C.muted }]}>
+              Choose what you want to study
+            </Text>
+          </View>
 
-        <View style={styles.statsRow}>
-          {STAT_CARDS.map((s, i) => (
-            <View key={s.key} style={styles.statCell}>
-              <FadeUp index={i + 1} delay={80}>
-                <Pressable
-                  onPress={() => handleStatCardPress(s.key)}
-                  style={(state) => {
-                    const hovered = getHovered(state);
-                    return [
-                      styles.statCard,
-                      { borderColor: s.color + "2E" },
-                      state.pressed ? styles.cardPressed : null,
-                      hovered
-                        ? { transform: [{ translateY: -4 }], borderColor: s.color + "66" }
-                        : null,
-                    ];
-                  }}
-                >
-                  <BlurView intensity={14} tint="dark" style={StyleSheet.absoluteFill} />
-                  <LinearGradient
-                    colors={[s.color + "0D", "rgba(0,0,0,0)"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={StyleSheet.absoluteFill}
-                  />
-                  <View style={[styles.cardIconWrap]}>
-                    <View style={[styles.cardIconGlow, { backgroundColor: s.color + "33" }]} />
-                    <LinearGradient
-                      colors={[...s.grad]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={[styles.cardIconBg, { borderColor: s.color + "55" }]}
-                    >
-                      <MaterialIcons name={s.icon} size={22} color="#FFFFFF" />
-                    </LinearGradient>
-                  </View>
-                  <Text style={styles.cardTitle}>{s.title}</Text>
-                  <Text style={styles.cardDesc}>{s.desc}</Text>
-                  <View style={[styles.cardAction, { backgroundColor: s.color + "1A" }]}>
-                    <MaterialIcons name="arrow-forward" size={16} color={s.color} />
-                  </View>
-                </Pressable>
-              </FadeUp>
+          <View style={styles.uploadGrid}>
+        {/* Notes and PDF — teal scheme */}
+        <FadeUp index={3} style={styles.uploadSlot}>
+          <Pressable
+            onPress={handlePickDocument}
+            disabled={uploadingDoc}
+            style={(state) => {
+              const hovered = getHovered(state);
+              return [
+                styles.uploadCard,
+                { borderColor: hovered ? C.teal + "55" : C.hairline },
+                state.pressed ? styles.cardPressed : null,
+                hovered ? styles.uploadCardHover : null,
+              ];
+            }}
+          >
+            <View style={[styles.uploadCardLayer, { backgroundColor: C.teal + "0D" }]} />
+            <View style={styles.uploadCardContent}>
+              <View style={[styles.uploadIconBubble, { backgroundColor: C.teal + "1A", borderColor: C.teal + "40" }]}>
+                {uploadingDoc ? (
+                  <ActivityIndicator color={C.teal} size="small" />
+                ) : (
+                  <MaterialIcons name="description" size={26} color={C.teal} />
+                )}
+              </View>
+
+              <View style={styles.uploadTextBlock}>
+                <Text style={[styles.uploadTitle, { color: C.text }]}>Notes and PDF</Text>
+                <Text style={[styles.uploadDesc, { color: C.muted }]}>
+                  .pdf, .doc, .docx notes
+                </Text>
+                <View style={[styles.uploadCaptionBadge, { backgroundColor: C.teal + "14", borderColor: C.teal + "30" }]}>
+                  <MaterialIcons name="insert-drive-file" size={13} color={C.teal} />
+                  <Text style={[styles.uploadCaptionText, { color: C.teal }]}>PDF · DOC · TXT</Text>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={handlePickDocument}
+                style={({ pressed }) => [
+                  styles.pillBtn,
+                  { backgroundColor: C.teal },
+                  pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+                ]}
+              >
+                <MaterialIcons name="cloud-upload" size={16} color="#042C28" />
+                <Text style={[styles.pillText, { color: "#042C28" }]}>Upload notes</Text>
+              </Pressable>
             </View>
-          ))}
+          </Pressable>
+        </FadeUp>
+
+        {/* Video lecture — blue scheme */}
+        <FadeUp index={3} delay={70} style={styles.uploadSlot}>
+          <Pressable
+            onPress={goAddLecture}
+            style={(state) => {
+              const hovered = getHovered(state);
+              return [
+                styles.uploadCard,
+                { borderColor: hovered ? C.blue + "55" : C.hairline },
+                state.pressed ? styles.cardPressed : null,
+                hovered ? styles.uploadCardHover : null,
+              ];
+            }}
+          >
+            <View style={[styles.uploadCardLayer, { backgroundColor: C.blue + "0D" }]} />
+            <View style={styles.uploadCardContent}>
+              <View style={[styles.uploadIconBubble, { backgroundColor: C.blue + "1A", borderColor: C.blue + "40" }]}>
+                <MaterialIcons name="play-circle-outline" size={26} color={C.blue} />
+              </View>
+
+              <View style={styles.uploadTextBlock}>
+                <Text style={[styles.uploadTitle, { color: C.text }]}>Video lecture</Text>
+                <Text style={[styles.uploadDesc, { color: C.muted }]}>
+                  From YouTube or video files
+                </Text>
+                <View style={[styles.uploadCaptionBadge, { backgroundColor: C.blue + "14", borderColor: C.blue + "30" }]}>
+                  <MaterialIcons name="smart-display" size={13} color={C.blue} />
+                  <Text style={[styles.uploadCaptionText, { color: C.blue }]}>YouTube · MP4</Text>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={goAddLecture}
+                style={({ pressed }) => [
+                  styles.pillBtn,
+                  { backgroundColor: C.blue },
+                  pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+                ]}
+              >
+                <MaterialIcons name="add-circle-outline" size={16} color="#04283A" />
+                <Text style={[styles.pillText, { color: "#04283A" }]}>Add video</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </FadeUp>
         </View>
       </View>
+      </FadeUp>
 
-      {/* Section Header for Recent Lectures */}
-      <View style={styles.sectionRow}>
-        <Text style={[styles.sectionTitle, { color: "#F7FAF8" }]}>
-          Your Lectures
-        </Text>
-        <Pressable
-          onPress={() => (navigation as any).navigate("Library")}
-          style={({ pressed }) => [
-            styles.seeAllBtn,
-            pressed && { transform: [{ scale: 0.95 }] },
-          ]}
-        >
-          <Text style={styles.seeAll}>See all</Text>
-          <MaterialIcons name="arrow-forward" size={14} color={ACCENTS.emerald} />
-        </Pressable>
-      </View>
-    </>
-  );
+      {/* ==================== QUICK ACCESS ==================== */}
+      <FadeUp index={4}>
+        <View style={styles.sectionHead}>
+          <Text style={[styles.sectionTitle, { color: C.text }]}>Quick access</Text>
+          <Text style={[styles.sectionSub, { color: C.muted }]}>
+            Jump into your learning
+          </Text>
+        </View>
+      </FadeUp>
 
-  return (
-    <View style={styles.container}>
-      <FlatList
-        data={lectures}
-        keyExtractor={(item) => item.id}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingTop: insets.top + 12 },
-        ]}
-        ListHeaderComponent={renderHeader()}
-        renderItem={({ item, index }) => (
-          <FadeUp index={index + 4}>
+      <View style={styles.quickGrid}>
+        {[
+          { key: "lectures", icon: "list", title: "Lectures", sub: `${lectureCount} indexed`, accent: C.teal, fill: "#042C28", onPress: goLibrary },
+          { key: "chat", icon: "chat-bubble-outline", title: "Q&A chat", sub: `${questionsAsked} asked`, accent: C.blue, fill: "#04283A", onPress: goChat },
+          { key: "kb", icon: "storage", title: "Knowledge base", sub: `${docCount} docs`, accent: C.purple, fill: "#241B4D", onPress: goDocuments },
+        ].map((q, i) => (
+          <FadeUp key={q.key} index={4} delay={i * 70} style={styles.quickSlot}>
             <Pressable
-              onPress={() => openLecture(item)}
+              onPress={q.onPress}
               style={(state) => {
                 const hovered = getHovered(state);
                 return [
-                  styles.lectureCard,
+                  styles.quickCard,
                   state.pressed ? styles.cardPressed : null,
-                  hovered ? { transform: [{ translateY: -3 }], borderColor: "#34D39955" } : null,
+                  hovered ? { borderColor: q.accent + "66" } : null,
                 ];
               }}
             >
-              <BlurView intensity={12} tint="dark" style={StyleSheet.absoluteFill} />
-              <View style={styles.thumbWrap}>
-                <ImageBackground source={{ uri: item.thumbnail }} style={styles.thumb}>
-                  <LinearGradient
-                    colors={[
-                      "rgba(11,15,14,0.0)",
-                      "rgba(11,15,14,0.45)",
-                      "rgba(11,15,14,0.92)",
-                    ]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={StyleSheet.absoluteFill}
-                  />
-                  <View style={styles.thumbTopRow}>
-                    {item.status === "processing" ? (
-                      <GlowChip color="#FBBF24">
-                        <View style={[styles.progressDot, { backgroundColor: "#FBBF24" }]} />
-                        <Text style={[styles.progressText, { color: "#FBBF24" }]}>
-                          {item.progress}%
-                        </Text>
-                      </GlowChip>
-                    ) : item.status === "queued" ? (
-                      <GlowChip color="#9F8FF0">
-                        <Text style={[styles.progressText, { color: "#9F8FF0" }]}>
-                          Queued
-                        </Text>
-                      </GlowChip>
-                    ) : (
-                      <StatusBadge status={item.status} />
-                    )}
-                    <View style={styles.durationBadge}>
-                      <MaterialIcons name="schedule" size={13} color="#FFFFFF" />
-                      <Text style={styles.durationText}>
-                        {formatClock(item.duration)}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.thumbBottomRow}>
-                    <View style={styles.playGlow}>
-                      <View style={styles.playBtn}>
-                        <MaterialIcons name="play-arrow" size={26} color="#06281A" />
-                      </View>
-                    </View>
-                    <View style={styles.thumbMeta}>
-                      <Text style={styles.thumbChannel} numberOfLines={1}>
-                        {item.channel}
-                      </Text>
-                      <Text style={styles.thumbTitle} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                    </View>
-                  </View>
-                </ImageBackground>
+              <View style={[styles.quickIcon, { backgroundColor: q.accent }]}>
+                <MaterialIcons name={q.icon as never} size={20} color={q.fill} />
               </View>
-              <View style={styles.lectureMeta}>
-                <View style={[styles.channelDot, { backgroundColor: ACCENTS.lavender }]} />
-                <Text style={[styles.lectureDate, { color: "rgba(255,255,255,0.55)" }]}>
-                  Added {timeAgo(item.addedAt)}
-                </Text>
-              </View>
+              <Text style={[styles.quickTitle, { color: C.text }]}>{q.title}</Text>
+              <Text style={[styles.quickSub, { color: C.muted }]}>{q.sub}</Text>
             </Pressable>
           </FadeUp>
-        )}
-      />
-    </View>
+        ))}
+      </View>
+
+      {/* ==================== RECENT ACTIVITY ==================== */}
+      <FadeUp index={4} delay={80}>
+        <View style={styles.sectionHead}>
+          <Text style={[styles.sectionTitle, { color: C.text }]}>Recent activity</Text>
+          <Text style={[styles.sectionSub, { color: C.muted }]}>
+            Pick up where you left off
+          </Text>
+        </View>
+      </FadeUp>
+
+      <View style={styles.recentGrid}>
+        {/* Recent Q&A — blue tint */}
+        <Pressable
+          onPress={goChat}
+          style={(state) => {
+            const hovered = getHovered(state);
+            return [
+              styles.recentCard,
+              styles.qaCard,
+              state.pressed ? styles.cardPressed : null,
+              hovered ? { transform: [{ translateY: -2 }] } : null,
+            ];
+          }}
+        >
+          <Text style={[styles.recentTitle, { color: C.text }]}>Recent Q&A</Text>
+          <Text style={[styles.recentQuote, { color: "#B9C4BE" }]} numberOfLines={2}>
+            {latestQa ? `"${latestQa.question}"` : "No questions yet — start a chat with any lecture or document."}
+          </Text>
+          <Text style={[styles.recentSource, { color: C.blue }]} numberOfLines={1}>
+            {qaSource}
+          </Text>
+        </Pressable>
+
+        {/* Today's quiz — green tint */}
+        <Pressable
+          onPress={() => navigation.navigate("QuizConfig", { lectureId: quizLectureId })}
+          style={(state) => {
+            const hovered = getHovered(state);
+            return [
+              styles.recentCard,
+              styles.quizCard,
+              state.pressed ? styles.cardPressed : null,
+              hovered ? { transform: [{ translateY: -2 }] } : null,
+            ];
+          }}
+        >
+          <Text style={[styles.recentTitle, { color: C.text }]}>Today's quiz</Text>
+          <Text style={[styles.quizDesc, { color: C.muted }]}>
+            5 questions on {quizTitle}
+          </Text>
+          <Pressable
+            onPress={() => navigation.navigate("QuizConfig", { lectureId: quizLectureId })}
+            style={({ pressed }) => [
+              styles.quizBtn,
+              { backgroundColor: C.green },
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Text style={[styles.quizBtnText, { color: "#052811" }]}>Start quiz</Text>
+          </Pressable>
+        </Pressable>
+      </View>
+
+      {/* ==================== INSIGHT CARD ==================== */}
+      <FadeUp index={4} delay={120}>
+        <View style={styles.insightCard}>
+          {/* Progress ring */}
+          <View style={styles.ringTrack}>
+            <View style={[styles.ringArc, { borderColor: C.purple }]} />
+            <View style={styles.ringCenter}>
+              <Text style={[styles.ringText, { color: C.purple }]}>
+                {streakPct}%
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.insightBody}>
+            <Text style={[styles.insightTitle, { color: C.text }]}>
+              Keep the momentum going
+            </Text>
+            <Text style={[styles.insightText, { color: C.muted }]}>
+              {streak} of 30 days to your next streak badge. Review one lecture today.
+            </Text>
+          </View>
+
+          <Pressable
+            onPress={goLibrary}
+            style={({ pressed }) => [
+              styles.reviewBtn,
+              { backgroundColor: C.purple },
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Text style={[styles.reviewText, { color: C.purpleDark }]}>Review now</Text>
+          </Pressable>
+        </View>
+      </FadeUp>
+
+      <View style={{ height: 40 }} />
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  listContent: {
-    paddingHorizontal: 28,
-    paddingBottom: 120,
-    maxWidth: 1152,
+  content: {
+    flex: 1,
     width: "100%",
+    maxWidth: 1280,
     alignSelf: "center",
+    paddingHorizontal: 32,
+    paddingVertical: 24,
+    paddingBottom: 40,
   },
+
+  // ----- Welcome header -----
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 24,
   },
-  headerLeft: { gap: 2 },
-  greeting: { ...typography.caption },
-  name: { ...typography.h2, marginTop: 2, letterSpacing: -0.5 },
-  profileBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarGlow: {
-    position: "absolute",
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "rgba(52,211,153,0.2)",
-    shadowColor: "#34D399",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 14,
-    elevation: 6,
-  },
+  headerLeft: { flex: 1, gap: 2 },
+  greeting: { ...typography.caption, fontSize: 14 },
+  name: { ...typography.h1, fontSize: 28, letterSpacing: -0.6, marginTop: 1 },
+  avatarWrap: { position: "relative", width: 64, height: 64 },
   avatarRing: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    padding: 2.5,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 3,
+    padding: 2,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarFill: {
+    flex: 1,
     width: "100%",
-    height: "100%",
-    borderRadius: 24,
-    backgroundColor: "#0E1712",
+    borderRadius: 27,
+    backgroundColor: "#1B2621",
     alignItems: "center",
     justifyContent: "center",
   },
-  profileAvatarImg: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 24,
+  avatarImg: { width: "100%", height: "100%", borderRadius: 27 },
+  avatarText: { ...typography.bodySemi, fontWeight: "800", fontSize: 22 },
+  streakBadge: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: C.bg,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  profileAvatarText: {
-    ...typography.bodySemi,
-    color: "#8EF0A3",
-    fontWeight: "800",
-    fontSize: 14,
-  },
+
+  // ----- Error -----
   errorBanner: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     padding: 12,
-    borderRadius: 16,
+    borderRadius: 12,
     backgroundColor: "rgba(248,113,113,0.1)",
     borderWidth: 1,
     borderColor: "rgba(248,113,113,0.28)",
     marginBottom: 16,
   },
-  errorText: {
-    ...typography.caption,
-    color: "#F87171",
-    flex: 1,
+  errorText: { ...typography.caption, color: "#F87171", flex: 1 },
+
+  // ----- Loading -----
+  loadingBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 20,
+    marginBottom: 8,
+  },
+  loadingText: { ...typography.caption, fontSize: 13 },
+
+  // ----- Stats row -----
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 16,
+    marginBottom: 30,
+  },
+  statCard: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 160,
+    minWidth: 160,
+    gap: 6,
+    padding: 20,
+    borderRadius: 14,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.hairline,
+  },
+  statValue: { ...typography.h1, fontSize: 32, fontWeight: "800", letterSpacing: -1, marginTop: 2 },
+  statLabel: { ...typography.caption, fontSize: 12 },
+  statLink: { ...typography.caption, fontSize: 12, fontWeight: "600", marginTop: 2 },
+  statTrend: { ...typography.caption, fontSize: 12, fontWeight: "700", marginTop: 2 },
+  dotsRow: { flexDirection: "row", gap: 4, marginTop: 4 },
+  streakDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
   },
 
-  // ----- Upload Content -----
-  dualUploadWrap: {
-    marginBottom: 24,
-    padding: 20,
-    borderRadius: 24,
+  // ----- Sections -----
+  sectionHead: { marginBottom: 20 },
+  sectionTitle: { ...typography.h2, fontSize: 20, letterSpacing: -0.4 },
+  sectionSub: { ...typography.body, fontSize: 14, marginTop: 2, opacity: 0.9 },
+
+  // ----- Upload content -----
+  uploadOuter: {
+    backgroundColor: "#0D1310",
+    borderWidth: 0.5,
+    borderColor: "rgba(255,255,255,0.06)",
+    borderRadius: 20,
+    paddingHorizontal: 36,
+    paddingVertical: 32,
+    marginBottom: 30,
+  },
+  uploadGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 16,
+    width: "100%",
+    maxWidth: 880,
+    alignSelf: "center",
+    justifyContent: "center",
+  },
+  uploadSlot: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 280,
+    minWidth: 280,
+  },
+  uploadCard: {
+    flex: 1,
+    borderRadius: 20,
+    backgroundColor: C.card,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    backgroundColor: "rgba(14,23,18,0.6)",
+    borderColor: C.hairline,
     overflow: "hidden",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.3,
-    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
     elevation: 6,
   },
-  dualUploadGlow: {
-    position: "absolute",
-    top: -80,
-    left: -60,
-    width: 300,
-    height: 240,
+  uploadCardHover: {
+    transform: [{ translateY: -3 }],
+    borderColor: C.hairline,
   },
-  dualUploadHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 18,
-  },
-  uploadHeaderIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "rgba(34,197,94,0.14)",
-    borderWidth: 1,
-    borderColor: "rgba(34,197,94,0.35)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  uploadHeaderText: { flex: 1 },
-  dualUploadTitle: {
-    ...typography.bodySemi,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  dualUploadSub: {
-    ...typography.caption,
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 11,
-    marginTop: 1,
-  },
-  dualUploadRow: {
-    flexDirection: "row",
-    gap: 14,
-  },
-  dualUploadCard: {
-    flex: 1,
-    padding: 18,
-    borderRadius: 20,
-    borderWidth: 1,
-    alignItems: "center",
-    overflow: "hidden",
-  },
-  dualUploadCardDoc: {
-    backgroundColor: "rgba(52,211,153,0.07)",
-    borderColor: "rgba(52,211,153,0.3)",
-  },
-  dualUploadCardVideo: {
-    backgroundColor: "rgba(56,189,248,0.07)",
-    borderColor: "rgba(56,189,248,0.3)",
-  },
-  dualIconWrap: {
-    width: 56,
-    height: 56,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 10,
-  },
-  dualIconGlow: {
-    position: "absolute",
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-  },
-  dualIconBg: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-  },
-  dualCardTitle: {
-    ...typography.bodySemi,
-    fontSize: 15,
-    color: "#F7FAF8",
-    fontWeight: "700",
-    marginBottom: 2,
-    textAlign: "center",
-    letterSpacing: -0.2,
-  },
-  dualCardMeta: {
-    ...typography.caption,
-    fontSize: 11,
-    color: "rgba(255,255,255,0.5)",
-    marginBottom: 14,
-    textAlign: "center",
-  },
-  dualCardBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  dualCardBadgeText: {
-    ...typography.caption,
-    fontWeight: "700",
-    fontSize: 12,
-  },
-
-  // ----- Quick Action Cards -----
-  statsWrap: {
-    marginBottom: 28,
-    borderRadius: 24,
-    overflow: "hidden",
-    backgroundColor: "rgba(14,23,18,0.5)",
-  },
-  statsGlow: {
+  // Distinct background layer — subtle accent tint peeking through behind the flat card surface.
+  uploadCardLayer: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
+    height: 120,
   },
-  statsRow: {
-    flexDirection: "row",
+  uploadCardContent: {
+    flexGrow: 1,
+    paddingVertical: 32,
+    paddingHorizontal: 28,
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 18,
-    padding: 20,
-    width: "100%",
-    maxWidth: 860,
+  },
+  uploadTextBlock: {
+    alignItems: "center",
+    gap: 8,
+  },
+  uploadIconBubble: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  uploadTitle: { ...typography.h3, fontSize: 19, fontWeight: "700", letterSpacing: -0.3, textAlign: "center" },
+  uploadDesc: { ...typography.body, fontSize: 13.5, opacity: 0.85, textAlign: "center" },
+  uploadCaptionBadge: {
+    flexDirection: "row",
+    alignItems: "center",
     alignSelf: "center",
-  },
-  statCell: { flex: 1 },
-  statCard: {
-    alignSelf: "stretch",
-    alignItems: "center",
-    paddingVertical: 26,
-    paddingHorizontal: 16,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(14,23,18,0.6)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.28,
-    shadowRadius: 18,
-    elevation: 5,
-    overflow: "hidden",
-  },
-  cardIconWrap: {
-    width: 56,
-    height: 56,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  cardIconGlow: {
-    position: "absolute",
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-  },
-  cardIconBg: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardTitle: {
-    ...typography.bodySemi,
-    color: "#F7FAF8",
-    fontSize: 15,
-    fontWeight: "700",
-    letterSpacing: -0.2,
-    marginBottom: 6,
-  },
-  cardDesc: {
-    ...typography.caption,
-    color: "rgba(255,255,255,0.5)",
-    textAlign: "center",
-    lineHeight: 18,
-    fontSize: 12,
-  },
-  cardAction: {
-    marginTop: 14,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // ----- Section Header -----
-  sectionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 18,
-  },
-  sectionTitle: { ...typography.h3, letterSpacing: -0.4 },
-  seeAllBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(52,211,153,0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(52,211,153,0.28)",
-  },
-  seeAll: {
-    ...typography.bodySmall,
-    color: ACCENTS.emerald,
-    fontWeight: "600",
-  },
-
-  // ----- Lecture Cards -----
-  cardPressed: {
-    transform: [{ scale: 0.985 }],
-    opacity: 0.92,
-  },
-  lectureCard: {
-    padding: 0,
-    marginBottom: 16,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(14,23,18,0.6)",
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.28,
-    shadowRadius: 18,
-    elevation: 5,
-  },
-  thumbWrap: { position: "relative" },
-  thumb: { width: "100%", height: 190 },
-  thumbTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingTop: 12,
-  },
-  progressDot: { width: 6, height: 6, borderRadius: 3 },
-  progressText: { ...typography.caption, fontWeight: "700" },
-  durationBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(11,15,14,0.7)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-  },
-  durationText: { color: "#FFFFFF", ...typography.caption },
-  thumbBottomRow: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-  },
-  playGlow: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#8EF0A3",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  playBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "#8EF0A3",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.4)",
-  },
-  thumbMeta: { flex: 1 },
-  thumbChannel: {
-    ...typography.caption,
-    color: "rgba(255,255,255,0.78)",
-    fontWeight: "600",
-  },
-  thumbTitle: { ...typography.bodySemi, color: "#FFFFFF", marginTop: 2 },
-  lectureMeta: {
-    flexDirection: "row",
-    alignItems: "center",
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-  channelDot: { width: 6, height: 6, borderRadius: 3 },
-  lectureDate: { ...typography.caption },
-});
+  uploadCaptionText: {
+    ...typography.caption,
+    fontSize: 11.5,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+  pillBtn: {
+    alignSelf: "stretch",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 4,
+    paddingVertical: 13,
+    borderRadius: 999,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  pillText: { ...typography.caption, fontSize: 13.5, fontWeight: "700", letterSpacing: 0.2 },
 
+  // ----- Insight card -----
+  insightCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    padding: 20,
+    borderRadius: 16,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: "rgba(167,139,250,0.25)",
+  },
+  ringTrack: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 3,
+    borderColor: "rgba(167,139,250,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ringArc: {
+    position: "absolute",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 3,
+    borderColor: "rgba(167,139,250,0)",
+    borderTopColor: C.purple,
+    borderRightColor: C.purple,
+    transform: [{ rotate: "45deg" }],
+  },
+  ringCenter: { alignItems: "center", justifyContent: "center" },
+  ringText: { ...typography.caption, fontSize: 12, fontWeight: "800" },
+  insightBody: { flex: 1 },
+  insightTitle: { ...typography.bodySemi, fontSize: 16, fontWeight: "700" },
+  insightText: { ...typography.body, fontSize: 14, marginTop: 4, lineHeight: 20 },
+  reviewBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reviewText: { ...typography.caption, fontSize: 13, fontWeight: "700" },
+
+  // ----- Quick access -----
+  quickGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 16,
+    marginBottom: 30,
+    width: "100%",
+    maxWidth: 1080,
+    alignSelf: "center",
+    justifyContent: "center",
+  },
+  quickSlot: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 200,
+    minWidth: 200,
+    maxWidth: 340,
+  },
+  quickCard: {
+    gap: 4,
+    padding: 18,
+    borderRadius: 14,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.hairline,
+  },
+  quickIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  quickTitle: { ...typography.bodySemi, fontSize: 13, fontWeight: "700" },
+  quickSub: {
+    ...typography.caption,
+    fontSize: 11,
+    opacity: 0.85,
+    marginTop: "auto",
+  },
+
+  // ----- Recent activity -----
+  recentGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16, marginBottom: 30 },
+  recentCard: {
+    flexGrow: 1,
+    flexBasis: "47%",
+    minWidth: 240,
+    padding: 18,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  qaCard: {
+    backgroundColor: "rgba(56,189,248,0.08)",
+    borderColor: "rgba(56,189,248,0.25)",
+  },
+  quizCard: {
+    backgroundColor: "rgba(34,197,94,0.08)",
+    borderColor: "rgba(34,197,94,0.25)",
+  },
+  recentTitle: { ...typography.bodySemi, fontSize: 14, fontWeight: "700", marginBottom: 8 },
+  recentQuote: {
+    ...typography.body,
+    fontSize: 14,
+    fontStyle: "italic",
+    lineHeight: 20,
+  },
+  recentSource: { ...typography.caption, fontSize: 12, fontWeight: "600", marginTop: 10 },
+  quizDesc: { ...typography.body, fontSize: 14, lineHeight: 20, marginBottom: 14 },
+  quizBtn: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quizBtnText: { ...typography.caption, fontSize: 13, fontWeight: "700" },
+
+  cardPressed: { transform: [{ scale: 0.99 }], opacity: 0.96 },
+});

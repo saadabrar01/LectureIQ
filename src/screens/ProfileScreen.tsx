@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -92,36 +92,6 @@ const STAT_META = [
   },
 ];
 
-const MENU_ITEMS = [
-  {
-    icon: 'library-books' as never,
-    accent: 'emerald',
-    color: ACCENTS.emerald,
-    grad: ['#34D399', '#0EA5A0'] as const,
-    title: 'Library & Knowledge Base',
-    desc: 'Access all your documents and video lectures',
-    onPress: (navigation: any) => navigation.navigate('Library'),
-  },
-  {
-    icon: 'settings' as never,
-    accent: 'lavender',
-    color: ACCENTS.lavender,
-    grad: ['#A78BFA', '#6D8BFA'] as const,
-    title: 'Settings',
-    desc: 'Appearance, language & notification preferences',
-    onPress: (navigation: any) => navigation.navigate('Settings'),
-  },
-  {
-    icon: 'help-outline' as never,
-    accent: 'teal',
-    color: ACCENTS.teal,
-    grad: ['#2DD4BF', '#38BDF8'] as const,
-    title: 'Help & Support',
-    desc: 'FAQs, user guide and customer contact',
-    onPress: () => haptics.light(),
-  },
-];
-
 // `hovered` is a web-only field RN's types don't expose yet — mirror the
 // pattern already used in GlassCard.tsx.
 function getHovered(state: PressableStateCallbackType): boolean {
@@ -148,8 +118,7 @@ export function ProfileScreen() {
     minutes: 0,
   });
 
-  // Edit Modal State
-  const [editModalVisible, setEditModalVisible] = useState(false);
+  // Edit form state
   const [editName, setEditName] = useState('');
   const [editUsername, setEditUsername] = useState('');
   const [editEmail, setEditEmail] = useState('');
@@ -208,15 +177,12 @@ export function ProfileScreen() {
     setRefreshing(false);
   }, [loadRealtimeData]);
 
-  const openEditModal = () => {
-    haptics.light();
-    setEditName(user?.name || userProfile.name);
-    setEditUsername(user?.username || 'saad.ahmed');
-    setEditEmail(user?.email || userProfile.email);
-    setEditBio(user?.bio || 'Passionate learner using AI to master complex topics.');
-    setEditAvatarUrl(user?.avatar_url || '');
-    setEditModalVisible(true);
-  };
+  // Keep the inline edit form in sync with the fetched profile.
+  useEffect(() => {
+    if (user) {
+      setEditAvatarUrl(user.avatar_url || '');
+    }
+  }, [user]);
 
   const handlePickPhoto = async () => {
     haptics.light();
@@ -261,7 +227,6 @@ export function ProfileScreen() {
       });
       setUser(updated);
       haptics.success();
-      setEditModalVisible(false);
       await loadRealtimeData();
     } catch (err) {
       haptics.warning();
@@ -269,31 +234,6 @@ export function ProfileScreen() {
     } finally {
       setSavingProfile(false);
     }
-  };
-
-  const statValues: Record<string, string> = {
-    videos: String(stats.videos),
-    questions: String(stats.questions),
-    streak: `${stats.streak}d`,
-    minutes: String(stats.minutes),
-  };
-
-  const logout = () => {
-    Alert.alert(
-      'Log out',
-      'Are you sure you want to log out of LectureIQ?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Log out',
-          style: 'destructive',
-          onPress: () => {
-            haptics.medium();
-            (navigation as any).navigate('Login');
-          },
-        },
-      ]
-    );
   };
 
   const displayName = user?.name || userProfile.name;
@@ -317,7 +257,7 @@ export function ProfileScreen() {
     >
       <Header
         title="Profile"
-        subtitle="Realtime account & learning stats"
+        subtitle="Manage your personal information"
         back
         onBack={() => navigation.navigate('Home' as never)}
       />
@@ -348,8 +288,8 @@ export function ProfileScreen() {
           />
 
           <View style={styles.bannerInner}>
-            {/* Avatar with soft gradient ring + glow */}
-            <Pressable onPress={openEditModal} style={styles.avatarOuter} hitSlop={6}>
+            {/* Avatar */}
+            <View style={styles.avatarOuter}>
               <View style={styles.avatarGlow} />
               <LinearGradient
                 colors={['#34D399', '#2DD4BF', '#38BDF8']}
@@ -365,10 +305,7 @@ export function ProfileScreen() {
                   )}
                 </View>
               </LinearGradient>
-              <View style={styles.cameraPip}>
-                <MaterialIcons name="photo-camera" size={12} color="#0B0B10" />
-              </View>
-            </Pressable>
+            </View>
 
             <View style={styles.profileInfo}>
               <Text style={styles.profileName} numberOfLines={1}>{displayName}</Text>
@@ -376,309 +313,149 @@ export function ProfileScreen() {
               {user?.bio ? (
                 <Text style={styles.profileBio} numberOfLines={2}>{user.bio}</Text>
               ) : null}
-
-              {/* Joined/Sync pill — tinted translucent bg matching border */}
-              <View style={styles.joinBadge}>
-                <View style={styles.joinBadgeDot} />
-                <MaterialIcons name="verified-user" size={12} color={ACCENTS.emerald} />
-                <Text style={styles.joinText}>
-                  Joined {user?.join_date || userProfile.joinDate}  ·  Postgres Synced
-                </Text>
-              </View>
             </View>
-
-            {/* Pencil Edit Button */}
-            <Pressable
-              onPress={openEditModal}
-              style={({ pressed }) => [
-                styles.editBtn,
-                pressed && { transform: [{ scale: 0.92 }] },
-              ]}
-              hitSlop={8}
-            >
-              <MaterialIcons name="edit" size={18} color="#06281A" />
-            </Pressable>
           </View>
         </View>
       </FadeUp>
 
-      {/* ==================== STATS GRID ==================== */}
-      <View style={styles.statsGrid}>
-        {STAT_META.map((s, i) => (
-          <View key={s.label} style={styles.statCell}>
-            <FadeUp index={i + 1}>
-              <View>
-                <Pressable
-                  style={(state) => {
-                    const hovered = getHovered(state);
-                    return [
-                      styles.statCard,
-                      { borderColor: s.color + '2E' },
-                      state.pressed ? styles.cardPressed : null,
-                      hovered ? { transform: [{ translateY: -3 }], borderColor: s.color + '66' } : null,
-                    ];
-                  }}
-                >
-                  <BlurView intensity={14} tint="dark" style={StyleSheet.absoluteFill} />
-                  {/* soft ambient tint behind icon */}
-                  <LinearGradient
-                    colors={[s.color + '0D', 'rgba(0,0,0,0)']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={StyleSheet.absoluteFill}
-                  />
-
-                  <View style={styles.statIconWrap}>
-                    {/* glowing tinted circle */}
-                    <View style={[styles.statIconGlow, { backgroundColor: s.color + '33' }]} />
-                    <LinearGradient
-                      colors={[...s.grad]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={[styles.statIconBg, { borderColor: s.color + '55' }]}
-                    >
-                      <MaterialIcons name={s.icon} size={18} color="#FFFFFF" />
-                    </LinearGradient>
-                  </View>
-
-                  {loading ? (
-                    <ActivityIndicator color={s.color} size="small" style={{ marginVertical: 4 }} />
-                  ) : (
-                    <AnimatedNumber value={statValues[s.value]} style={[styles.statValue, { color: theme.textPrimary }]} />
-                  )}
-                  <Text style={styles.statLabel}>{s.label}</Text>
-                </Pressable>
-              </View>
-            </FadeUp>
-          </View>
-        ))}
-      </View>
-
-      {/* ==================== MENU ACTIONS ==================== */}
-      <FadeUp index={3}>
-        <View style={styles.menuGroup}>
-          {MENU_ITEMS.map((item) => (
-            <Pressable
-              key={item.title}
-              onPress={() => item.onPress(navigation)}
-              style={(state) => {
-                const hovered = getHovered(state);
-                return [
-                  styles.menuCard,
-                  { borderColor: item.color + '2E' },
-                  state.pressed ? styles.cardPressed : null,
-                  hovered
-                    ? {
-                        transform: [{ translateY: -2 }, { scale: 1.012 }],
-                        borderColor: item.color + '55',
-                        backgroundColor: item.color + '0D',
-                      }
-                    : null,
-                ];
-              }}
+      {/* ==================== EDIT PROFILE FORM (always visible) ==================== */}
+      <FadeUp index={1}>
+        <View style={styles.editCard}>
+          <View style={styles.editHeaderRow}>
+            <LinearGradient
+              colors={['#34D399', '#2DD4BF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.editHeaderIcon}
             >
-              <BlurView intensity={14} tint="dark" style={StyleSheet.absoluteFill} />
-              {/* icon container — consistent rounded-square with tinted bg */}
-              <LinearGradient
-                colors={[item.grad[0] + '22', item.grad[1] + '18']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.menuIcon, { borderColor: item.color + '40' }]}
-              >
-                <MaterialIcons name={item.icon} size={20} color={item.color} />
-              </LinearGradient>
-
-              <View style={styles.menuBody}>
-                <Text style={styles.menuTitle}>{item.title}</Text>
-                <Text style={styles.menuDesc}>{item.desc}</Text>
-              </View>
-
-              <View style={[styles.chevronPill, { backgroundColor: item.color + '1A' }]}>
-                <MaterialIcons name="chevron-right" size={18} color={item.color} />
-              </View>
-            </Pressable>
-          ))}
-        </View>
-      </FadeUp>
-
-      {/* ==================== LOG OUT ==================== */}
-      <FadeUp index={4}>
-        <Pressable
-          onPress={logout}
-          style={(state) => {
-            const hovered = getHovered(state);
-            return [
-              styles.logoutBtn,
-              hovered ? { borderColor: '#F8717188', backgroundColor: '#F8717122' } : null,
-              state.pressed ? { transform: [{ scale: 0.98 }], opacity: 0.85 } : null,
-            ];
-          }}
-        >
-          <View style={styles.logoutIconWrap}>
-            <MaterialIcons name="logout" size={20} color="#F87171" />
+              <MaterialIcons name="manage-accounts" size={18} color="#06281A" />
+            </LinearGradient>
+            <Text style={styles.editHeaderTitle}>Edit Profile</Text>
           </View>
-          <Text style={styles.logoutText}>Log out</Text>
-        </Pressable>
-      </FadeUp>
 
-      <Text style={styles.version}>LectureIQ v1.0.0 · Realtime Workspace Active</Text>
+          <View style={styles.formColumnsRow}>
+            {/* LEFT COLUMN: Account Management & Photo Upload */}
+            <View style={styles.accountCol}>
+              <Text style={styles.formSectionHeading}>Account Management</Text>
 
-      {/* ==================== EDIT PROFILE MODAL ==================== */}
-      <Modal
-        visible={editModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditModalVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setEditModalVisible(false)}>
-          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            {/* Modal Header */}
-            <View style={styles.modalHeader}>
-              <View style={styles.modalHeaderTitleWrap}>
-                <LinearGradient
-                  colors={['#34D399', '#2DD4BF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.modalHeaderIcon}
-                >
-                  <MaterialIcons name="manage-accounts" size={18} color="#06281A" />
-                </LinearGradient>
-                <Text style={styles.modalTitle}>Edit Profile Settings</Text>
-              </View>
-              <Pressable
-                onPress={() => setEditModalVisible(false)}
-                style={styles.modalCloseBtn}
-                hitSlop={8}
-              >
-                <MaterialIcons name="close" size={20} color="rgba(255,255,255,0.6)" />
-              </Pressable>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} style={styles.modalScroll}>
-              <View style={styles.formColumnsRow}>
-                {/* LEFT COLUMN: Account Management & Photo Upload */}
-                <View style={styles.accountCol}>
-                  <Text style={styles.formSectionHeading}>Account Management</Text>
-
-                  <View style={styles.photoContainer}>
-                    {modalAvatarUrl ? (
-                      <Image source={{ uri: modalAvatarUrl }} style={styles.photoPreview} />
-                    ) : (
-                      <View style={styles.photoFallback}>
-                        <MaterialIcons name="person" size={56} color="rgba(255,255,255,0.4)" />
-                      </View>
-                    )}
+              <View style={styles.photoContainer}>
+                {modalAvatarUrl ? (
+                  <Image source={{ uri: modalAvatarUrl }} style={styles.photoPreview} />
+                ) : displayAvatarUrl ? (
+                  <Image source={{ uri: displayAvatarUrl }} style={styles.photoPreview} />
+                ) : (
+                  <View style={styles.photoFallback}>
+                    <MaterialIcons name="person" size={56} color="rgba(255,255,255,0.4)" />
                   </View>
-
-                  <Pressable
-                    onPress={handlePickPhoto}
-                    disabled={uploadingImage}
-                    style={({ pressed }) => [
-                      styles.uploadPhotoBtn,
-                      pressed && { opacity: 0.8 },
-                    ]}
-                  >
-                    {uploadingImage ? (
-                      <ActivityIndicator size="small" color="#F5F7F6" />
-                    ) : (
-                      <>
-                        <MaterialIcons name="add-a-photo" size={16} color="#F5F7F6" />
-                        <Text style={styles.uploadPhotoText}>Upload Photo</Text>
-                      </>
-                    )}
-                  </Pressable>
-                </View>
-
-                {/* RIGHT COLUMN: Profile Information */}
-                <View style={styles.profileCol}>
-                  <Text style={styles.formSectionHeading}>Profile Information</Text>
-
-                  {/* Username & Full Name Row */}
-                  <View style={styles.fieldGroupRow}>
-                    <View style={styles.fieldHalf}>
-                      <Text style={styles.fieldLabel}>Username</Text>
-                      <TextInput
-                        value={editUsername}
-                        onChangeText={setEditUsername}
-                        placeholder="gene.rodrig"
-                        placeholderTextColor="rgba(255,255,255,0.3)"
-                        style={styles.formInput}
-                      />
-                    </View>
-
-                    <View style={styles.fieldHalf}>
-                      <Text style={styles.fieldLabel}>Full Name</Text>
-                      <TextInput
-                        value={editName}
-                        onChangeText={setEditName}
-                        placeholder="Gene Rodriguez"
-                        placeholderTextColor="rgba(255,255,255,0.3)"
-                        style={styles.formInput}
-                      />
-                    </View>
-                  </View>
-
-                  {/* Email Field */}
-                  <View style={styles.fieldFull}>
-                    <Text style={styles.fieldLabel}>Email (required)</Text>
-                    <TextInput
-                      value={editEmail}
-                      onChangeText={setEditEmail}
-                      placeholder="gene.rodrig@gmail.com"
-                      placeholderTextColor="rgba(255,255,255,0.3)"
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      style={styles.formInput}
-                    />
-                  </View>
-
-                  {/* Biographical Info Field */}
-                  <View style={styles.fieldFull}>
-                    <Text style={styles.fieldLabel}>Biographical Info</Text>
-                    <TextInput
-                      value={editBio}
-                      onChangeText={setEditBio}
-                      placeholder="Write a short bio about yourself..."
-                      placeholderTextColor="rgba(255,255,255,0.3)"
-                      multiline
-                      numberOfLines={4}
-                      style={[styles.formInput, styles.formInputArea]}
-                    />
-                  </View>
-                </View>
+                )}
               </View>
 
-              {/* Save Action Button */}
               <Pressable
-                onPress={handleSaveProfile}
-                disabled={savingProfile}
+                onPress={handlePickPhoto}
+                disabled={uploadingImage}
                 style={({ pressed }) => [
-                  styles.saveProfileBtn,
-                  savingProfile && { opacity: 0.6 },
-                  pressed && { transform: [{ scale: 0.985 }] },
+                  styles.uploadPhotoBtn,
+                  pressed && { opacity: 0.8 },
                 ]}
               >
-                <LinearGradient
-                  colors={['#34D399', '#0EA5A0']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.saveProfileGrad}
-                >
-                  {savingProfile ? (
-                    <ActivityIndicator color="#06281A" size="small" />
-                  ) : (
-                    <>
-                      <MaterialIcons name="check-circle" size={18} color="#06281A" />
-                      <Text style={styles.saveProfileText}>Save Profile Changes</Text>
-                    </>
-                  )}
-                </LinearGradient>
+                {uploadingImage ? (
+                  <ActivityIndicator size="small" color="#F5F7F6" />
+                ) : (
+                  <>
+                    <MaterialIcons name="add-a-photo" size={16} color="#F5F7F6" />
+                    <Text style={styles.uploadPhotoText}>Upload Photo</Text>
+                  </>
+                )}
               </Pressable>
-            </ScrollView>
+            </View>
+
+            {/* RIGHT COLUMN: Profile Information */}
+            <View style={styles.profileCol}>
+              <Text style={styles.formSectionHeading}>Profile Information</Text>
+
+              {/* Username & Full Name Row */}
+              <View style={styles.fieldGroupRow}>
+                <View style={styles.fieldHalf}>
+                  <Text style={styles.fieldLabel}>Username</Text>
+                  <TextInput
+                    value={editUsername}
+                    onChangeText={setEditUsername}
+                    placeholder="gene.rodrig"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    style={styles.formInput}
+                  />
+                </View>
+
+                <View style={styles.fieldHalf}>
+                  <Text style={styles.fieldLabel}>Full Name</Text>
+                  <TextInput
+                    value={editName}
+                    onChangeText={setEditName}
+                    placeholder="Gene Rodriguez"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    style={styles.formInput}
+                  />
+                </View>
+              </View>
+
+              {/* Email Field */}
+              <View style={styles.fieldFull}>
+                <Text style={styles.fieldLabel}>Email (required)</Text>
+                <TextInput
+                  value={editEmail}
+                  onChangeText={setEditEmail}
+                  placeholder="gene.rodrig@gmail.com"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  style={styles.formInput}
+                />
+              </View>
+
+              {/* Biographical Info Field */}
+              <View style={styles.fieldFull}>
+                <Text style={styles.fieldLabel}>Biographical Info</Text>
+                <TextInput
+                  value={editBio}
+                  onChangeText={setEditBio}
+                  placeholder="Write a short bio about yourself..."
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  multiline
+                  numberOfLines={4}
+                  style={[styles.formInput, styles.formInputArea]}
+                />
+              </View>
+            </View>
+          </View>
+
+          {/* Save Action Button */}
+          <Pressable
+            onPress={handleSaveProfile}
+            disabled={savingProfile}
+            style={({ pressed }) => [
+              styles.saveProfileBtn,
+              savingProfile && { opacity: 0.6 },
+              pressed && { transform: [{ scale: 0.985 }] },
+            ]}
+          >
+            <LinearGradient
+              colors={['#34D399', '#0EA5A0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.saveProfileGrad}
+            >
+              {savingProfile ? (
+                <ActivityIndicator color="#06281A" size="small" />
+              ) : (
+                <>
+                  <MaterialIcons name="check-circle" size={18} color="#06281A" />
+                  <Text style={styles.saveProfileText}>Save Profile Changes</Text>
+                </>
+              )}
+            </LinearGradient>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </View>
+      </FadeUp>
     </ScrollView>
   );
 }
@@ -817,31 +594,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 17,
   },
-  joinBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(52,211,153,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(52,211,153,0.3)',
-    alignSelf: 'flex-start',
-  },
-  joinBadgeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#34D399',
-  },
-  joinText: {
-    ...typography.caption,
-    color: '#34D399',
-    fontWeight: '600',
-    fontSize: 11,
-  },
   editBtn: {
     width: 42,
     height: 42,
@@ -921,54 +673,6 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: 'rgba(255,255,255,0.5)',
     fontSize: 12,
-  },
-
-  // ---------- Menu ----------
-  menuGroup: { gap: 14, marginBottom: 24 },
-  menuCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(14,23,18,0.55)',
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    elevation: 3,
-  },
-  menuIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuBody: { flex: 1 },
-  menuTitle: {
-    ...typography.bodySemi,
-    color: '#F7FAF8',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  menuDesc: {
-    ...typography.caption,
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  chevronPill: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 
   // ---------- Logout ----------
@@ -1163,6 +867,42 @@ const styles = StyleSheet.create({
     minHeight: 80,
     textAlignVertical: 'top',
     paddingTop: 10,
+  },
+
+  // ---------- Inline Edit Card ----------
+  editCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(14,23,18,0.6)',
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 5,
+  },
+  editHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  editHeaderIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editHeaderTitle: {
+    ...typography.h3,
+    color: '#F5F7F6',
+    fontSize: 18,
+    fontWeight: '700',
   },
 
   // Save Profile Button

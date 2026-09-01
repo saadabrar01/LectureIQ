@@ -477,4 +477,21 @@ export const statsApi = {
   get: () => request<StatsResult>('/api/stats'),
 };
 
+// --- Query history (Activity / Recent Q&A) ------------------------------------
+
+export interface HistoryItem {
+  id: number;
+  question: string;
+  answer: string;
+  answer_source: string;
+  document_id: number | null;
+  sources: Array<Record<string, unknown>> | null;
+  created_at: string;
+}
+
+export const historyApi = {
+  list: (limit = 5) =>
+    request<HistoryItem[]>(`/api/history?limit=${limit}`),
+};
+
 

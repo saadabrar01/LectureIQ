@@ -13,11 +13,13 @@ interface ToggleSwitchProps {
   value: boolean;
   onValueChange: (value: boolean) => void;
   disabled?: boolean;
+  activeColor?: string;
 }
 
-export function ToggleSwitch({ value, onValueChange, disabled }: ToggleSwitchProps) {
+export function ToggleSwitch({ value, onValueChange, disabled, activeColor }: ToggleSwitchProps) {
   const { theme } = useAppTheme();
   const progress = useSharedValue(value ? 1 : 0);
+  const activeTrack = activeColor ?? theme.primary;
 
   useEffect(() => {
     progress.value = withSpring(value ? 1 : 0, { damping: 18, stiffness: 220 });
@@ -26,10 +28,15 @@ export function ToggleSwitch({ value, onValueChange, disabled }: ToggleSwitchPro
   const trackStyle = useAnimatedStyle(() => ({
     backgroundColor:
       progress.value > 0.5
-        ? theme.primary
+        ? activeTrack
         : disabled
           ? theme.border
           : theme.surfaceAlt,
+    borderColor: progress.value > 0.5 ? activeTrack : theme.border,
+    shadowColor: activeTrack,
+    shadowOpacity: 0.001 + progress.value * 0.6,
+    shadowRadius: 4 + progress.value * 6,
+    shadowOffset: { width: 0, height: 1 + progress.value * 2 },
   }));
 
   const knobStyle = useAnimatedStyle(() => ({
@@ -50,9 +57,7 @@ export function ToggleSwitch({ value, onValueChange, disabled }: ToggleSwitchPro
       }}
       style={styles.wrap}
     >
-      <Animated.View
-        style={[styles.track, { borderColor: theme.border }, trackStyle]}
-      >
+      <Animated.View style={[styles.track, trackStyle]}>
         <Animated.View
           style={[
             styles.knob,

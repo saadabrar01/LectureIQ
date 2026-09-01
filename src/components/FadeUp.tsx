@@ -1,15 +1,20 @@
 import React, { type ReactNode } from 'react';
 import Animated, { FadeInUp } from 'react-native-reanimated';
+import type { StyleProp, ViewStyle } from 'react-native';
 
 interface FadeUpProps {
   children: ReactNode;
   index?: number;
   delay?: number;
+  style?: StyleProp<ViewStyle>;
 }
 
-export function FadeUp({ children, index = 0, delay = 0 }: FadeUpProps) {
+export function FadeUp({ children, index = 0, delay = 0, style }: FadeUpProps) {
   return (
-    <Animated.View entering={FadeInUp.delay(delay + index * 70).duration(480)}>
+    <Animated.View
+      entering={FadeInUp.delay(delay + index * 70).duration(480)}
+      style={style}
+    >
       {children}
     </Animated.View>
   );
